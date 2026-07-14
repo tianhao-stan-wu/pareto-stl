@@ -1,0 +1,10 @@
+# Core
+pyyaml
+carla
+numpy
+shapely
+networkx
+cvxpy
+
+# after finalizing all libs
+pip freeze > requirements.txt

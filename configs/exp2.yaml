@@ -1,0 +1,76 @@
+# configs/config.yaml
+
+project:
+  name: "STL_MOO_exp2"
+  version: "0.9.15"
+  seed: 42
+
+
+carla:
+  host: "localhost"
+  port: 2000
+  timeout: 10.0
+  map: "Town01"
+  dt: 0.05
+  sync_mode: true
+  spectator:
+    location: {x: 0.288, y: 225.961, z: 13.682}
+    rotation: {pitch: -28.120, yaw: -88.917, roll: 0.000}
+
+
+  
+ego_vehicle:
+  blueprint: "vehicle.tesla.model3"
+  autopilot: True
+  draw_route: False
+  behavior: "normal"
+  target_speed: 40
+  spawn:
+    location: {x: 1.902, y: 171.189, z: 1.123}
+    rotation: {pitch: -3.662, yaw: -91.127, roll: 0.000}
+
+  destination:
+    location: {x: 1.786, y: 140.718, z: 1.036}
+    rotation: {pitch: 3.456, yaw: -88.875, roll: 0.000}
+
+
+cyclist:
+  behavior: "normal"
+  target_speed: 50
+  spawn:
+    location: {x: -3, y: 111.485, z: 1}
+    rotation: {pitch: -12.539, yaw: 88.686, roll: 0.000}
+
+  destination:
+    location: {x: -3, y: 180.718, z: 1.036}
+    rotation: {pitch: 3.456, yaw: -88.875, roll: 0.000}
+
+
+parked_vehicles:
+  blueprints: 
+    - "vehicle.mini.cooper_s"
+    - "vehicle.audi.a2"
+  spawn:
+    location: {x: 1.902, y: 150.189, z: 1.123}
+    rotation: {pitch: -3.662, yaw: -91.127, roll: 0.000}
+  gap: 6
+
+
+pursuit_vehicle:
+  blueprint: "vehicle.dodge.charger_2020"
+  behavior: "aggressive"
+  target_speed: 80  
+  spawn:
+    location: {x: 1.902, y: 220.189, z: 1.123}
+    rotation: {pitch: -3.662, yaw: -91.127, roll: 0.000}
+  destination:
+    location: {x: 1.786, y: 140.718, z: 1.036}
+    rotation: {pitch: 3.456, yaw: -88.875, roll: 0.000}
+
+
+paths:
+  carla_root: "./CARLA_0.9.15"
+  data_dir: "./data"
+  output_dir: "./data/output"
+  log_dir: "./data/logs"
+  checkpoint_dir: "./data/checkpoints"
