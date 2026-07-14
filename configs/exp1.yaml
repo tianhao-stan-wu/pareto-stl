@@ -28,14 +28,14 @@ ego_vehicle:
   # spawn params
   blueprint: "vehicle.tesla.model3"
   autopilot: True
-  draw_route: False
+  draw_route: True
   behavior: "normal"
   target_speed: 40
   spawn:
     location: {x: -45.214, y: 70.322, z: 1}
     rotation: {pitch: -2.933, yaw: -87.606, roll: 0.000}
   destination:
-    location: {x: -39.752, y: -3.398, z: 1}
+    location: {x: -45.214, y: -3.398, z: 1}
     rotation: {pitch: -3.156, yaw: -85.004, roll: 0.000}
 
   # dynamics params

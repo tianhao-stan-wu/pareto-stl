@@ -371,7 +371,6 @@ def main():
     client = Client(cfg)
 
     ego = Vehicle(client.world, cfg, "ego_vehicle")
-    ego.agent._proximity_threshold = 1
     amb = Vehicle(client.world, cfg, "ambulance")
     amb.agent._proximity_threshold = cfg["ambulance"]["proximity"]
 
@@ -390,22 +389,19 @@ def main():
             client.tick()
             tick += 1
 
-            
-            if not ego.is_done():
-                ego.step()
             # warmup: ego accelerates, amb full throttle to target speed
-            # if tick < start_tick:
-            #     # default step
-            #     ego.step(acc=0.4)
-            #     amb.step(acc=1.0)
+            if tick < start_tick:
+                # default step
+                ego.step(acc=0.4)
+                amb.step(acc=1.0)
 
-            # # MPC phase
-            # elif tick <= end_tick:
-            #     ped_step(ped, cfg)
-            #     # step with noise
-            #     amb_step(amb, cfg)
-            #     print(f"tick: {tick}")
-            #     ego.step()
+            # MPC phase
+            elif tick <= end_tick:
+                ped_step(ped, cfg)
+                # step with noise
+                amb_step(amb, cfg)
+                print(f"tick: {tick}")
+                ego.step()
 
 
                 # result = build_and_solve_mpc(ego, ped, amb, cfg)

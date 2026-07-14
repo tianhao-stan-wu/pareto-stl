@@ -28,12 +28,6 @@ class Vehicle:
 
             self.agent.set_target_speed(self.cfg.get("target_speed", 30))
 
-            if self.cfg.get("ignore_traffic_lights", False):
-                self.agent.ignore_traffic_lights(True)
-
-            if self.cfg.get("ignore_stop_signs", False):
-                self.agent.ignore_stop_signs(True) 
-
             if self.cfg.get("draw_route", False):
                 self.draw_route()
 
@@ -81,15 +75,13 @@ class Vehicle:
         control.manual_gear_shift = False
 
         if acc is not None:
-            print("Not none")
             if acc >= 0:
                 control.throttle = min(acc, 1.0)
                 control.brake = 0.0
             else:
                 control.throttle = 0.0
                 control.brake = min(abs(acc), 1.0)
-                print("break")
-        print(control.throttle)
+               
         self.actor.apply_control(control)
 
     def apply_control(self, control: carla.VehicleControl):

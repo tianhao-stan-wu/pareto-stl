@@ -1,6 +1,6 @@
-# Project Name
+# STL Relaxation with MOO
 
-> One-line description of what this project does.
+<!-- > One-line description of what this project does.
 
 ## Overview
 
@@ -62,4 +62,4 @@ pytest tests/
 
 ## License
 
-[MIT](https://mit-license.org/)
+[MIT](https://mit-license.org/) -->

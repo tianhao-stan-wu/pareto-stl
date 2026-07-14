@@ -49,3 +49,4 @@ Thumbs.db
 *.log
 
 # Project outputs
+CARLA_0.9.15/
