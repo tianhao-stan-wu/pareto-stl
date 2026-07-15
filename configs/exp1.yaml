@@ -20,6 +20,7 @@ carla:
 
 mpc:
   T: 1
+  S: 10
   sim_start: 4
   sim_end: 9
 
@@ -28,7 +29,7 @@ ego_vehicle:
   # spawn params
   blueprint: "vehicle.tesla.model3"
   autopilot: True
-  draw_route: True
+  draw_route: False
   behavior: "normal"
   target_speed: 40
   spawn:
@@ -38,14 +39,14 @@ ego_vehicle:
     location: {x: -45.214, y: -3.398, z: 1}
     rotation: {pitch: -3.156, yaw: -85.004, roll: 0.000}
 
-  # dynamics params
-  lr: 1.41
-  acc_min: -8
-  acc_max: 4
+  # dynamics params from utils.py
+  lr: 1.50
+  acc_min: -10
+  acc_max: 6
   beta_min: -0.5
   beta_max: 0.5
-  width: 1.85   
-  length: 4.70 
+  width: 2.16   
+  length: 4.79 
 
 
 ambulance:
@@ -62,6 +63,15 @@ ambulance:
     location: {x: -45.654, y: 3.146, z: 2.324}
     rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
 
+  # dynamics params
+  lr: 1.88
+  acc_min: -8
+  acc_max: 4
+  beta_min: -0.5
+  beta_max: 0.5
+  width: 2.35   
+  length: 6.37 
+
   # other params
   proximity: 3
   std_acc: 0.1
@@ -71,7 +81,7 @@ ambulance:
 pedestrian:
   mean_speed: 4
   std_speed: 1
-  std_dir: 0.1
+  std_dir: 0.05
   spawn:
     location: {x: -36.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}

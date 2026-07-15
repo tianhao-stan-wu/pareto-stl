@@ -1,6 +1,7 @@
 import argparse
 import carla
 import random
+import numpy as np
 
 
 class SmoothNoise:
@@ -68,11 +69,96 @@ def draw_waypoints(world, ref, min_r=10.0, max_r=30.0, sampling=1.0, min_sep=5.0
     return selected
 
 
+def get_max_steer_angle(actor):
+    """Print and return the maximum steer angle (degrees) for each wheel."""
+    physics = actor.get_physics_control()
+    for i, wheel in enumerate(physics.wheels):
+        print(f"Wheel {i}: max_steer_angle = {wheel.max_steer_angle:.1f}°")
+    # front wheels have the steer angle, rears are typically 0
+    max_angle = max(w.max_steer_angle for w in physics.wheels)
+    print(f"Vehicle max steer angle: {max_angle:.1f}°")
+    return max_angle
+
+
+def get_lr_lf(actor):
+    """Estimate lr and lf from wheel positions and center of mass."""
+    physics = actor.get_physics_control()
+    wheels = physics.wheels
+    com = physics.center_of_mass
+
+    # wheel positions are world coords (cm), but difference cancels that out
+    front_x = (wheels[0].position.x + wheels[1].position.x) / 2.0
+    rear_x = (wheels[2].position.x + wheels[3].position.x) / 2.0
+    wheelbase = abs(front_x - rear_x) / 100.0  # cm to m
+
+    # CoM.x is local frame (cm), offset from vehicle origin
+    # positive = forward of origin
+    com_offset = com.x / 100.0  # cm to m
+
+    # split wheelbase around CoM
+    lr = wheelbase / 2.0 + com_offset
+    lf = wheelbase / 2.0 - com_offset
+
+    print(f"Wheelbase: {wheelbase:.3f} m")
+    print(f"CoM offset: {com_offset:.3f} m")
+    print(f"lf: {lf:.3f} m")
+    print(f"lr: {lr:.3f} m")
+
+    return lr, lf
+
+
+def get_dimensions(actor):
+    """Get vehicle width and length from bounding box."""
+    bbox = actor.bounding_box.extent
+    width = bbox.y * 2
+    length = bbox.x * 2
+    height = bbox.z * 2
+
+    print(f"Length: {length:.3f} m")
+    print(f"Width:  {width:.3f} m")
+    print(f"Height: {height:.3f} m")
+
+    return length, width
+
+
+def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
+    """
+    Draw sample trajectories in CARLA.
+
+    Parameters
+    ----------
+    world    : carla.World
+    trajs    : ndarray (S, N+1, 2) or (N+1, 2)
+    color    : carla.Color, default red
+    size     : float, point size
+    life_time: float, seconds to persist
+    """
+    
+    if color is None:
+        color = carla.Color(255, 0, 0)
+
+    trajs = np.asarray(trajs)
+    if trajs.ndim == 2:
+        trajs = trajs[np.newaxis]  # (N+1, 2) → (1, N+1, 2)
+
+    debug = world.debug
+    S, N1, _ = trajs.shape
+
+    for s in range(S):
+        for k in range(N1 - 1):
+            start = carla.Location(x=float(trajs[s, k, 0]),   y=float(trajs[s, k, 1]),   z=0.5)
+            end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=0.5)
+            debug.draw_line(start, end, thickness=size, color=color, life_time=life_time)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-g", action="store_true", help="get spectator transform (YAML format)")
     parser.add_argument("-s", action="store_true", help="set spectator transform")
     parser.add_argument("-w", action="store_true", help="draw nearby waypoints")
+    parser.add_argument("-a", action="store_true", help="get physical params of a vehicle")
+    parser.add_argument("--blueprint", type=str, default="vehicle.ford.ambulance",
+                    help="blueprint for steer angle check (default: vehicle.tesla.model3)")
     args = parser.parse_args()
 
     client = carla.Client("127.0.0.1", 2000)
@@ -92,6 +178,16 @@ def main():
     if args.w:
         ref = carla.Location(x=0, y=0, z=2)
         draw_waypoints(world, ref, min_r=30.0, max_r=50.0, sampling=5.0, life_time=10.0)
+
+    if args.a:
+        bp = world.get_blueprint_library().find(args.blueprint)
+        spawn = world.get_map().get_spawn_points()[0]
+        actor = world.try_spawn_actor(bp, spawn)
+        world.tick()
+        get_max_steer_angle(actor)
+        get_lr_lf(actor)
+        get_dimensions(actor)
+        actor.destroy()
 
 
 if __name__ == '__main__':
