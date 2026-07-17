@@ -23,6 +23,46 @@ class SmoothNoise:
         return self.value
 
 
+def bicycle_to_carla(u, acc_min, acc_max, beta_min, beta_max):
+    """Convert bicycle model [a, beta] to CARLA VehicleControl."""
+    a, beta = u
+    a = max(acc_min, min(a, acc_max))
+    beta = max(beta_min, min(beta, beta_max))
+
+    control = carla.VehicleControl()
+    control.manual_gear_shift = False
+
+    if a >= 0:
+        control.throttle = min(a / acc_max, 1.0)
+        control.brake = 0.0
+    else:
+        control.throttle = 0.0
+        control.brake = min(abs(a) / abs(acc_min), 1.0)
+
+    steer_angle = math.degrees(math.atan(2.0 * math.tan(beta)))
+    max_steer = math.degrees(math.atan(2.0 * math.tan(beta_max)))
+    control.steer = max(-1.0, min(steer_angle / max_steer, 1.0))
+
+    return control
+
+
+def carla_to_bicycle(control, acc_min, acc_max, beta_min, beta_max):
+    """Convert CARLA VehicleControl to bicycle model [a, beta]."""
+    if control.throttle > 0:
+        a = control.throttle * acc_max
+    else:
+        a = -control.brake * abs(acc_min)
+
+    max_steer_rad = math.radians(70.0)
+    steer_angle = control.steer * max_steer_rad
+    beta = math.atan(0.5 * math.tan(steer_angle))
+
+    a = max(acc_min, min(a, acc_max))
+    beta = max(beta_min, min(beta, beta_max))
+
+    return a, beta
+
+
 def dist_2d(loc1, loc2):
     return math.sqrt((loc1.x - loc2.x)**2 + (loc1.y - loc2.y)**2)
 

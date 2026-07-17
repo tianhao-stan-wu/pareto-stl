@@ -19,16 +19,17 @@ carla:
 
 
 mpc:
-  T: 1    # planning horizon
-  S: 10   # num of sample trajectories
+  horizon: 1    # planning horizon: T
+  num_samples: 10  
   sim_start: 5     # in second
   sim_end: 9
 
 
 stl:
-  ped_dist: 2.0   # in meter
-  amb_dist: 5.0
-  parked_dist: 1.0
+  pedestrian: 2.0   # in meter
+  ambulance: 5.0
+  parked_v1: 1.0
+  parked_v2: 1.0
 
 
 ego_vehicle:

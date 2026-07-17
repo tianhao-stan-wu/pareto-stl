@@ -6,157 +6,29 @@ import random
 
 from src.bicycle_model import KinematicBicycle
 from src.stl_constraints import safe_distance_vehicle, safe_distance_walker
-from src.utils import SmoothNoise, draw_sample_traj
+from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_bicycle
 
 
-def bicycle_to_carla(u, ego_acc_min, ego_acc_max, ego_beta_min, ego_beta_max, lr=1.5):
-    """Convert bicycle model [a, beta] to CARLA VehicleControl."""
-    a, beta = u
-
-    a = max(ego_acc_min, min(a, ego_acc_max))
-    beta = max(ego_beta_min, min(beta, ego_beta_max))
-
-    control = carla.VehicleControl()
-    control.manual_gear_shift = False
-
-    if a >= 0:
-        control.throttle = min(a / ego_acc_max, 1.0)
-        control.brake = 0.0
-    else:
-        control.throttle = 0.0
-        control.brake = min(abs(a) / abs(ego_acc_min), 1.0)
-
-    steer_angle = math.degrees(math.atan(2.0 * math.tan(beta)))
-    max_steer = math.degrees(math.atan(2.0 * math.tan(ego_beta_max)))
-    control.steer = max(-1.0, min(steer_angle / max_steer, 1.0))
-
-    return control
+COLORS = [
+        carla.Color(255, 0, 0),     # red
+        carla.Color(0, 0, 255),     # blue
+        carla.Color(255, 255, 0),   # yellow
+        carla.Color(255, 0, 255),   # magenta
+        carla.Color(0, 255, 255),   # cyan
+        carla.Color(255, 128, 0),   # orange
+    ]
 
 
-def carla_to_bicycle(control, ego_acc_min, ego_acc_max, ego_beta_min, ego_beta_max):
-    """Convert CARLA VehicleControl to bicycle model [a, beta]."""
-    if control.throttle > 0:
-        a = control.throttle * ego_acc_max
-    else:
-        a = -control.brake * abs(ego_acc_min)
-
-    # max steer angle is 70 degrees in carla, checked in utils.py
-    max_steer_rad = math.radians(70.0)
-    steer_angle = control.steer * max_steer_rad
-    # lr/(lf+lr) ~= 0.5
-    beta = math.atan(0.5 * math.tan(steer_angle))
-
-    a = max(ego_acc_min, min(a, ego_acc_max))
-    beta = max(ego_beta_min, min(beta, ego_beta_max))
-
-    return a, beta
-
-
-def sample_ped_trajectories(ped, cfg, N: int, dt: float, S: int):
-    """Sample S pedestrian trajectories with noisy speed and direction."""
-    tf = ped.get_transform()
-    px0, py0 = tf.location.x, tf.location.y
-    yaw0 = math.radians(tf.rotation.yaw)
-
-    mean_speed = cfg["pedestrian"]["mean_speed"]
-    std_speed = cfg["pedestrian"]["std_speed"]
-    std_dir = cfg["pedestrian"]["std_dir"]
-
-    trajs = np.zeros((S, N + 1, 2))
-
-    for s in range(S):
-        px, py, yaw = px0, py0, yaw0
-        trajs[s, 0] = [px, py]
-
-        for k in range(N):
-            yaw += random.gauss(0, std_dir)
-            speed = max(0.0, random.gauss(mean_speed, std_speed))
-            px += speed * math.cos(yaw) * dt
-            py += speed * math.sin(yaw) * dt
-            trajs[s, k + 1] = [px, py]
-
-    return trajs  # (S, N+1, 2)
-
-
-def sample_amb_trajectories(amb, cfg, N: int, dt: float, S: int):
-    """Sample S ambulance trajectories with smooth noise."""
-    tf = amb.get_transform()
-    px0, py0 = tf.location.x, tf.location.y
-    yaw0 = math.radians(tf.rotation.yaw)
-    speed0 = amb.get_speed() / 3.6
-
-    amb_cfg = cfg["ambulance"]
-    lr = amb_cfg["lr"]
-
-    control = amb.agent.run_step()
-    base_throttle = control.throttle
-    base_steer = control.steer
-    max_steer_rad = math.radians(70.0)
-
-    trajs = np.zeros((S, N + 1, 2))
-
-    for s in range(S):
-        px, py, yaw, speed = px0, py0, yaw0, speed0
-        acc_noise = SmoothNoise(mean=0.0, theta=0.3, sigma=amb_cfg.get("std_acc", 0.1))
-        steer_noise = SmoothNoise(mean=0.0, theta=0.5, sigma=amb_cfg.get("std_steer", 0.02))
-
-        trajs[s, 0] = [px, py]
-
-        for k in range(N):
-            acc = base_throttle + acc_noise.sample()
-            if acc >= 0:
-                a = min(acc, 1.0) * amb_cfg["acc_max"]
-            else:
-                a = -min(abs(acc), 1.0) * abs(amb_cfg["acc_min"])
-
-            steer = max(-1.0, min(base_steer + steer_noise.sample(), 1.0))
-            beta = math.atan(0.5 * math.tan(steer * max_steer_rad))
-
-            speed += a * dt
-            speed = max(0.0, speed)
-            yaw += (speed / lr) * beta * dt
-            px += speed * math.cos(yaw) * dt
-            py += speed * math.sin(yaw) * dt
-            trajs[s, k + 1] = [px, py]
-
-    return trajs  # (S, N+1, 2)
-
-
-def get_parked_traj(parked, N: int):
-    """Create constant trajectory for stationary vehicles."""
-    trajs = []
-    for v in parked:
-        loc = v.get_transform().location
-        traj = np.tile([loc.x, loc.y], (N + 1, 1))  # (N+1, 2)
-        trajs.append(traj)
-    return trajs
-
-
-def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
+def build_and_solve_mpc(client, agents, cfg):
     # extract parameters
-    T = cfg["mpc"]["T"]
+    T = cfg["mpc"]["horizon"]
     dt = cfg["carla"]["dt"]
     N = int(round(T / dt))
-    S = cfg["mpc"]["S"]
-
-    ego_cfg = cfg["ego_vehicle"]
-    ego_acc_min = ego_cfg["acc_min"]
-    ego_acc_max = ego_cfg["acc_max"]
-    ego_beta_min = ego_cfg["beta_min"]
-    ego_beta_max = ego_cfg["beta_max"]
-    ego_w = ego_cfg["width"]
-    ego_l = ego_cfg["length"]
-    ego_lr = ego_cfg["lr"]
-
-    amb_l = cfg["ambulance"]["lr"]
-    parked_l = cfg["parked_vehicles"]["length"]
-
-    ped_dist = cfg["stl"]["ped_dist"]
-    amb_dist = cfg["stl"]["amb_dist"]
-    parked_dist = cfg["stl"]["parked_dist"]
+    S = cfg["mpc"]["num_samples"]
 
     # set up model
-    model = KinematicBicycle(lr=ego_lr, dt=dt)
+    ego = agents[0]
+    model = KinematicBicycle(lr=ego.lr, dt=dt)
 
     # get ego's current state
     tf = ego.get_transform()
@@ -170,7 +42,7 @@ def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
 
     # get nominal control from carla autopilot
     control_nom = ego.agent.run_step()
-    a_nom, beta_nom = carla_to_bicycle(control_nom, ego_acc_min, ego_acc_max, ego_beta_min, ego_beta_max)
+    a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
     U_nom = np.tile([a_nom, beta_nom], (N, 1))
 
     # nominal trajectory and linearization
@@ -185,16 +57,6 @@ def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
         A_seq.append(A_k)
         B_seq.append(B_k)
         c_seq.append(c_k)
-
-    # sample agent trajectories
-    ped_traj = sample_ped_trajectories(ped, cfg, N, dt, S)
-    amb_traj = sample_amb_trajectories(amb, cfg, N, dt, S)
-
-    # draw all pedestrian samples in red
-    draw_sample_traj(client.world, ped_traj, color=carla.Color(255, 0, 0))
-
-    # draw ambulance samples in blue
-    draw_sample_traj(client.world, amb_traj, color=carla.Color(0, 0, 255))
 
     # cvxpy variables
     x_var = cp.Variable((4, N + 1), name="x")
@@ -212,32 +74,38 @@ def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
     # control bounds
     for k in range(N):
         constraints += [
-            u_var[0, k] >= ego_acc_min,
-            u_var[0, k] <= ego_acc_max,
-            u_var[1, k] >= ego_beta_min,
-            u_var[1, k] <= ego_beta_max,
+            u_var[0, k] >= ego.acc_min,
+            u_var[0, k] <= ego.acc_max,
+            u_var[1, k] >= ego.beta_min,
+            u_var[1, k] <= ego.beta_max,
         ]
 
-    # safe distance constraints
-    ped_cons, ped_delta = safe_distance_walker(x_var, ped_traj, ego_w, ego_l, d_safe=ped_dist, label="ped")
-    amb_cons, amb_delta = safe_distance_vehicle(x_var, amb_traj, ego_l, amb_l, d_safe=amb_dist, label="amb")
-    constraints += ped_cons + amb_cons
+    # add STL constraints
+    deltas = {}
 
-    constraints.append(ped_delta <= ped_dist)
-    constraints.append(amb_delta <= amb_dist)
+    for i, agent in enumerate(agents[1:]):
+        trajs = agent.sample_trajectories(N, dt, S)
+        traj_mean = trajs.mean(axis=0)
 
-    # parked vehicle constraints
-    parked_trajs = get_parked_traj(parked, N)
-    parked_deltas = []
+        draw_sample_traj(client.world, trajs, color=COLORS[i % len(COLORS)], life_time=T)
 
-    for i, traj in enumerate(parked_trajs):
-        cons, delta = safe_distance_walker(x_var, traj, ego_w, ego_l, d_safe=parked_dist, label=f"parked_{i}")
+        if agent.agent_type == "vehicle":
+            cons, delta = safe_distance_vehicle(
+                x_var, traj_mean, ego.length, agent.length,
+                d_safe=cfg["stl"][agent.key], label=agent.key
+            )
+        else:
+            cons, delta = safe_distance_walker(
+                x_var, traj_mean, ego.width, ego.length,
+                d_safe=cfg["stl"][agent.key], label=agent.key
+            )
+
         constraints += cons
-        # constraints.append(delta <= parked_dist)
-        parked_deltas.append(delta)
+        deltas[agent.key] = delta
+
 
     # objective
-    objective = cp.Minimize(ped_delta + amb_delta + sum(parked_deltas))
+    objective = cp.Minimize(deltas["pedestrian"] + deltas["ambulance"] + deltas["parked_v1"] + deltas["parked_v2"])
     prob = cp.Problem(objective, constraints)
 
     # select MIP solver
@@ -259,23 +127,17 @@ def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
         return {
             "status": False,
             "control": None,
-            "ped_delta": None,
-            "amb_delta": None,
+            "deltas": None,
         }
 
     a, beta = u_var.value[:, 0]
-    control = bicycle_to_carla([a, beta], ego_acc_min, ego_acc_max, ego_beta_min, ego_beta_max, ego_lr)
-    
-    print(
-        f"ped: {float(ped_delta.value):.3f}, "
-        f"amb: {float(amb_delta.value):.3f}, "
-        f"parked_0: {float(parked_deltas[0].value):.3f}, "
-        f"parked_1: {float(parked_deltas[1].value):.3f}"
-    )
+    control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
+
+    delta_values = {key: float(d.value) for key, d in deltas.items()}
+    print(", ".join(f"{key}: {val:.3f}" for key, val in delta_values.items()))
 
     return {
         "status": True,
         "control": control,
-        "ped_delta": float(ped_delta.value),
-        "amb_delta": float(amb_delta.value),
+        "deltas": delta_values,
     }

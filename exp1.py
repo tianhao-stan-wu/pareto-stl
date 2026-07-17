@@ -30,6 +30,8 @@ def main():
     p1 = Vehicle(client.world, cfg, "parked_v1")
     p2 = Vehicle(client.world, cfg, "parked_v2")
 
+    agents = [ego, amb, ped, p1, p2]
+
     set_all_lights_green(client.world)
 
     dt = cfg["carla"]["dt"]
@@ -45,8 +47,8 @@ def main():
             client.tick()
             tick += 1
 
-            print_distances(ego, p1)
-            print_distances(ego, ped)
+            # print_distances(ego, p1)
+            # print_distances(ego, ped)
 
             # warmup: ego accelerates, amb full throttle to target speed
             if tick < start_tick:
@@ -58,15 +60,15 @@ def main():
             elif tick <= end_tick:
                 ped.random_step()
                 amb.random_step()
-                ego.step()
+                # ego.step()
 
-                # result = build_and_solve_mpc(client, ego, ped, amb, parked, cfg)
+                result = build_and_solve_mpc(client, agents, cfg)
 
-                # if result["status"]:
-                #     ego.apply_control(result["control"])
-                # else:
-                #     ego.step()
-                #     print(f"MPC failed at tick {tick}, fallback to autopilot")
+                if result["status"]:
+                    ego.apply_control(result["control"])
+                else:
+                    ego.step()
+                    print(f"MPC failed at tick {tick}, fallback to autopilot")
 
                 # time.sleep(1)
 
