@@ -5,7 +5,7 @@ import math
 import random
 
 from src.bicycle_model import KinematicBicycle
-from src.stl_constraints import safe_distance
+from src.stl_constraints import safe_distance_vehicle, safe_distance_walker
 from src.utils import SmoothNoise, draw_sample_traj
 
 
@@ -122,7 +122,17 @@ def sample_amb_trajectories(amb, cfg, N: int, dt: float, S: int):
     return trajs  # (S, N+1, 2)
 
 
-def build_and_solve_mpc(client, ego, ped, amb, cfg):
+def get_parked_traj(parked, N: int):
+    """Create constant trajectory for stationary vehicles."""
+    trajs = []
+    for v in parked:
+        loc = v.get_transform().location
+        traj = np.tile([loc.x, loc.y], (N + 1, 1))  # (N+1, 2)
+        trajs.append(traj)
+    return trajs
+
+
+def build_and_solve_mpc(client, ego, ped, amb, parked, cfg):
     # extract parameters
     T = cfg["mpc"]["T"]
     dt = cfg["carla"]["dt"]
@@ -137,6 +147,13 @@ def build_and_solve_mpc(client, ego, ped, amb, cfg):
     ego_w = ego_cfg["width"]
     ego_l = ego_cfg["length"]
     ego_lr = ego_cfg["lr"]
+
+    amb_l = cfg["ambulance"]["lr"]
+    parked_l = cfg["parked_vehicles"]["length"]
+
+    ped_dist = cfg["stl"]["ped_dist"]
+    amb_dist = cfg["stl"]["amb_dist"]
+    parked_dist = cfg["stl"]["parked_dist"]
 
     # set up model
     model = KinematicBicycle(lr=ego_lr, dt=dt)
@@ -179,13 +196,6 @@ def build_and_solve_mpc(client, ego, ped, amb, cfg):
     # draw ambulance samples in blue
     draw_sample_traj(client.world, amb_traj, color=carla.Color(0, 0, 255))
 
-    return {
-            "status": False,
-            "control": None,
-            "ped_delta": None,
-            "amb_delta": None,
-        }
-
     # cvxpy variables
     x_var = cp.Variable((4, N + 1), name="x")
     u_var = cp.Variable((2, N), name="u")
@@ -209,12 +219,25 @@ def build_and_solve_mpc(client, ego, ped, amb, cfg):
         ]
 
     # safe distance constraints
-    ped_cons, ped_delta = safe_distance(x_var, ped_traj, ego_w, ego_l, d_safe=2.0, label="ped")
-    amb_cons, amb_delta = safe_distance(x_var, amb_traj, ego_w, ego_l, d_safe=5.0, label="amb")
+    ped_cons, ped_delta = safe_distance_walker(x_var, ped_traj, ego_w, ego_l, d_safe=ped_dist, label="ped")
+    amb_cons, amb_delta = safe_distance_vehicle(x_var, amb_traj, ego_l, amb_l, d_safe=amb_dist, label="amb")
     constraints += ped_cons + amb_cons
 
+    constraints.append(ped_delta <= ped_dist)
+    constraints.append(amb_delta <= amb_dist)
+
+    # parked vehicle constraints
+    parked_trajs = get_parked_traj(parked, N)
+    parked_deltas = []
+
+    for i, traj in enumerate(parked_trajs):
+        cons, delta = safe_distance_walker(x_var, traj, ego_w, ego_l, d_safe=parked_dist, label=f"parked_{i}")
+        constraints += cons
+        # constraints.append(delta <= parked_dist)
+        parked_deltas.append(delta)
+
     # objective
-    objective = cp.Minimize(ped_delta + amb_delta)
+    objective = cp.Minimize(ped_delta + amb_delta + sum(parked_deltas))
     prob = cp.Problem(objective, constraints)
 
     # select MIP solver
@@ -242,6 +265,13 @@ def build_and_solve_mpc(client, ego, ped, amb, cfg):
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego_acc_min, ego_acc_max, ego_beta_min, ego_beta_max, ego_lr)
+    
+    print(
+        f"ped: {float(ped_delta.value):.3f}, "
+        f"amb: {float(amb_delta.value):.3f}, "
+        f"parked_0: {float(parked_deltas[0].value):.3f}, "
+        f"parked_1: {float(parked_deltas[1].value):.3f}"
+    )
 
     return {
         "status": True,

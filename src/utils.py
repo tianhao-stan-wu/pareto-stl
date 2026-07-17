@@ -2,7 +2,12 @@ import argparse
 import carla
 import random
 import numpy as np
+import math
 
+
+# ------------------------------------------------------------------
+# import functions
+# ------------------------------------------------------------------
 
 class SmoothNoise:
     """Ornstein-Uhlenbeck process for smooth random noise."""
@@ -18,6 +23,18 @@ class SmoothNoise:
         return self.value
 
 
+def dist_2d(loc1, loc2):
+    return math.sqrt((loc1.x - loc2.x)**2 + (loc1.y - loc2.y)**2)
+
+
+def print_distances(agent1, agent2):
+    agent1_loc = agent1.get_transform().location
+    agent2_loc = agent2.get_transform().location
+
+    dist = dist_2d(agent1_loc, agent2_loc)
+    print(f"  dist between {agent1.key} {agent2.key}: {dist:.1f}")
+
+
 def set_all_lights_green(world, green_time: float = 30.0):
     for light in world.get_actors().filter("traffic.traffic_light*"):
         light.set_state(carla.TrafficLightState.Green)
@@ -25,6 +42,40 @@ def set_all_lights_green(world, green_time: float = 30.0):
         light.set_red_time(0.0)
         light.set_yellow_time(0.0)
 
+
+def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
+    """
+    Draw sample trajectories in CARLA.
+
+    Parameters
+    ----------
+    world    : carla.World
+    trajs    : ndarray (S, N+1, 2) or (N+1, 2)
+    color    : carla.Color, default red
+    size     : float, point size
+    life_time: float, seconds to persist
+    """
+    
+    if color is None:
+        color = carla.Color(255, 0, 0)
+
+    trajs = np.asarray(trajs)
+    if trajs.ndim == 2:
+        trajs = trajs[np.newaxis]  # (N+1, 2) → (1, N+1, 2)
+
+    debug = world.debug
+    S, N1, _ = trajs.shape
+
+    for s in range(S):
+        for k in range(N1 - 1):
+            start = carla.Location(x=float(trajs[s, k, 0]),   y=float(trajs[s, k, 1]),   z=0.5)
+            end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=0.5)
+            debug.draw_line(start, end, thickness=size, color=color, life_time=life_time)
+
+
+# ------------------------------------------------------------------
+# util functions (main)
+# ------------------------------------------------------------------
 
 def get_spectator_transform(world):
     """Print spectator transform in YAML-ready format."""
@@ -119,36 +170,6 @@ def get_dimensions(actor):
     print(f"Height: {height:.3f} m")
 
     return length, width
-
-
-def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
-    """
-    Draw sample trajectories in CARLA.
-
-    Parameters
-    ----------
-    world    : carla.World
-    trajs    : ndarray (S, N+1, 2) or (N+1, 2)
-    color    : carla.Color, default red
-    size     : float, point size
-    life_time: float, seconds to persist
-    """
-    
-    if color is None:
-        color = carla.Color(255, 0, 0)
-
-    trajs = np.asarray(trajs)
-    if trajs.ndim == 2:
-        trajs = trajs[np.newaxis]  # (N+1, 2) → (1, N+1, 2)
-
-    debug = world.debug
-    S, N1, _ = trajs.shape
-
-    for s in range(S):
-        for k in range(N1 - 1):
-            start = carla.Location(x=float(trajs[s, k, 0]),   y=float(trajs[s, k, 1]),   z=0.5)
-            end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=0.5)
-            debug.draw_line(start, end, thickness=size, color=color, life_time=life_time)
 
 
 def main():

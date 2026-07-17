@@ -19,10 +19,16 @@ carla:
 
 
 mpc:
-  T: 1
-  S: 10
-  sim_start: 4
+  T: 1    # planning horizon
+  S: 10   # num of sample trajectories
+  sim_start: 5     # in second
   sim_end: 9
+
+
+stl:
+  ped_dist: 2.0   # in meter
+  amb_dist: 5.0
+  parked_dist: 1.0
 
 
 ego_vehicle:
@@ -50,7 +56,6 @@ ego_vehicle:
 
 
 ambulance:
-  # spawn params
   blueprint: "vehicle.ford.ambulance"
   autopilot: True
   draw_route: False
@@ -63,7 +68,6 @@ ambulance:
     location: {x: -45.654, y: 3.146, z: 2.324}
     rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
 
-  # dynamics params
   lr: 1.88
   acc_min: -8
   acc_max: 4
@@ -72,29 +76,38 @@ ambulance:
   width: 2.35   
   length: 6.37 
 
-  # other params
-  proximity: 3
+  # proximity: 3
   std_acc: 0.1
   std_steer: 0.02
 
 
 pedestrian:
-  mean_speed: 4
-  std_speed: 1
-  std_dir: 0.05
   spawn:
     location: {x: -36.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
 
+  mean_speed: 4
+  std_speed: 1
+  std_dir: 0.05
+  
 
-parked_vehicles:
-  blueprints: 
-    - "vehicle.mini.cooper_s"
-    - "vehicle.audi.a2"
+
+parked_v1:
+  blueprint: "vehicle.mini.cooper_s"  
   spawn:
     location: {x: -41.153, y: 43.561, z: 2.117}
     rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  gap: 6
+  width: 2.16   
+  length: 4.79 
+
+
+parked_v2:
+  blueprint: "vehicle.audi.a2"
+  spawn:
+    location: {x: -41.153, y: 48.561, z: 2.117}
+    rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
+  width: 2.16   
+  length: 4.79 
 
 
 paths:
