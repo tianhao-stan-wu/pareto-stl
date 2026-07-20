@@ -24,7 +24,7 @@ def main():
 
     ego = Vehicle(client.world, cfg, "ego_vehicle")
     amb = Vehicle(client.world, cfg, "ambulance")
-    # amb.agent._proximity_threshold = cfg["ambulance"]["proximity"]
+    amb.agent._proximity_threshold = cfg["ambulance"]["proximity"]
 
     ped = Walker(client.world, cfg, "pedestrian")
     p1 = Vehicle(client.world, cfg, "parked_v1")
@@ -45,36 +45,33 @@ def main():
             print(f"tick: {tick}")
 
             client.tick()
-            tick += 1
-
-            # print_distances(ego, p1)
-            # print_distances(ego, ped)
-
+            
             # warmup: ego accelerates, amb full throttle to target speed
             if tick < start_tick:
                 # default step
                 ego.step(acc=0.4)
-                amb.step(acc=1.0)
+                amb.step(acc=0.9)
 
             # MPC phase
-            elif tick <= end_tick:
+            elif tick <= start_tick+1:
+                break
                 ped.random_step()
                 amb.random_step()
-                # ego.step()
-
+       
                 result = build_and_solve_mpc(client, agents, cfg)
 
                 if result["status"]:
                     ego.apply_control(result["control"])
                 else:
+                    # to do: apply control from first step() from mpc
                     ego.step()
                     print(f"MPC failed at tick {tick}, fallback to autopilot")
-
-                # time.sleep(1)
 
             else:
                 print("End of simulation")
                 break
+
+            tick += 1
 
     finally:
         client.quit(destroy=True)

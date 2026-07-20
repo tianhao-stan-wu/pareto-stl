@@ -74,8 +74,8 @@ class Vehicle:
     # Control
     # ------------------------------------------------------------------
 
-    def step(self, acc: float = None):
-        """Run one agent step. Optionally override acceleration."""
+    def step(self, acc: float = None, steer: float = None):
+        """Run one agent step. Optionally override acceleration and/or steering."""
         if self.agent is None:
             raise RuntimeError("step() called but autopilot is disabled.")
 
@@ -89,6 +89,9 @@ class Vehicle:
             else:
                 control.throttle = 0.0
                 control.brake = min(abs(acc), 1.0)
+
+        if steer is not None:
+            control.steer = max(-1.0, min(steer, 1.0))
 
         self.actor.apply_control(control)
 

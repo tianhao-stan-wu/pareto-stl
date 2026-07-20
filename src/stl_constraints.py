@@ -7,32 +7,26 @@ import cvxpy as cp
 def safe_distance_vehicle(
     x_var: cp.Variable,
     agent_traj: np.ndarray,
+    ego_w: float,
     ego_l: float,
+    veh_w: float,
     veh_l: float,
     d_safe: float,
-    big_M: float = 1e3,
+    big_M: float = 200.0,
     label: str = "vehicle"
 ):
     """
     Safe distance between ego and another vehicle.
-    Both represented as square boxes with side = vehicle length.
-
-    Parameters
-    ----------
-    x_var      : cp.Variable (4, N+1) — ego state trajectory
-    agent_traj : ndarray (S, N+1, 2) or (N+1, 2) — vehicle [px, py]
-    ego_l      : float — ego vehicle length (m)
-    veh_l      : float — other vehicle length (m)
-    d_safe     : float — minimum safe distance (m)
+    Lateral (x): margin = ego_w/2 + veh_w/2 + d_safe
+    Longitudinal (y): margin = ego_l/2 + veh_l/2 + d_safe
     """
     agent_traj = np.asarray(agent_traj)
     if agent_traj.ndim == 3:
         agent_traj = agent_traj.mean(axis=0)
 
     N = agent_traj.shape[0]
-    half_ego = ego_l / 2.0
-    half_veh = veh_l / 2.0
-    margin = half_ego + half_veh + d_safe
+    margin_x = ego_w / 2.0 + veh_w / 2.0 + d_safe
+    margin_y = ego_l / 2.0 + veh_l / 2.0 + d_safe
 
     delta = cp.Variable(nonneg=True, name=f"delta_{label}")
     constraints = []
@@ -51,10 +45,15 @@ def safe_distance_vehicle(
         px = x_var[0, k]
         py = x_var[1, k]
 
-        constraints.append((ax - px) <= -margin + delta + big_M * (1 - b_left))
-        constraints.append((ax - px) >=  margin - delta - big_M * (1 - b_right))
-        constraints.append((ay - py) <= -margin + delta + big_M * (1 - b_below))
-        constraints.append((ay - py) >=  margin - delta - big_M * (1 - b_above))
+        # lateral separation (x) uses width
+        constraints.append((ax - px) <= -margin_x + delta + big_M * (1 - b_left))
+        constraints.append((ax - px) >=  margin_x - delta - big_M * (1 - b_right))
+
+        # longitudinal separation (y) uses length
+        constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
+        constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
+
+    # constraints.append(delta <= d_safe)
 
     return constraints, delta
 
@@ -65,7 +64,7 @@ def safe_distance_walker(
     ego_w: float,
     ego_l: float,
     d_safe: float,
-    big_M: float = 1e3,
+    big_M: float = 200,
     label: str = "walker"
 ):
     """
@@ -110,4 +109,7 @@ def safe_distance_walker(
         constraints.append((ay - py) <= -(half_l + d_safe) + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  (half_l + d_safe) - delta - big_M * (1 - b_above))
 
+    constraints.append(delta <= d_safe)
+
     return constraints, delta
+

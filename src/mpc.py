@@ -9,14 +9,17 @@ from src.stl_constraints import safe_distance_vehicle, safe_distance_walker
 from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_bicycle
 
 
-COLORS = [
-        carla.Color(255, 0, 0),     # red
-        carla.Color(0, 0, 255),     # blue
-        carla.Color(255, 255, 0),   # yellow
-        carla.Color(255, 0, 255),   # magenta
-        carla.Color(0, 255, 255),   # cyan
-        carla.Color(255, 128, 0),   # orange
-    ]
+COLORS = {
+    "red":     carla.Color(255, 0, 0),
+    "blue":    carla.Color(0, 0, 255),
+    "green":   carla.Color(0, 255, 0),
+    "yellow":  carla.Color(255, 255, 0),
+    "magenta": carla.Color(255, 0, 255),
+    "cyan":    carla.Color(0, 255, 255),
+    "orange":  carla.Color(255, 128, 0),
+    "white":   carla.Color(255, 255, 255),
+    "black":   carla.Color(0, 0, 0),
+}
 
 
 def build_and_solve_mpc(client, agents, cfg):
@@ -42,6 +45,7 @@ def build_and_solve_mpc(client, agents, cfg):
 
     # get nominal control from carla autopilot
     control_nom = ego.agent.run_step()
+
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
     U_nom = np.tile([a_nom, beta_nom], (N, 1))
 
@@ -57,6 +61,10 @@ def build_and_solve_mpc(client, agents, cfg):
         A_seq.append(A_k)
         B_seq.append(B_k)
         c_seq.append(c_k)
+
+    # draw nominal trajectory in white
+    nom_traj = X_nom[:, :2]  # (N+1, 2)
+    draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=0.1)
 
     # cvxpy variables
     x_var = cp.Variable((4, N + 1), name="x")
@@ -84,28 +92,39 @@ def build_and_solve_mpc(client, agents, cfg):
     deltas = {}
 
     for i, agent in enumerate(agents[1:]):
+
         trajs = agent.sample_trajectories(N, dt, S)
         traj_mean = trajs.mean(axis=0)
+        d_safe = cfg["stl"][agent.key]
 
-        draw_sample_traj(client.world, trajs, color=COLORS[i % len(COLORS)], life_time=T)
+        draw_sample_traj(client.world, trajs, color=COLORS["red"], life_time=0.1)
 
-        if agent.agent_type == "vehicle":
+        if agent.key in ["parked_v1", "parked_v2", "ambulance"]:
             cons, delta = safe_distance_vehicle(
-                x_var, traj_mean, ego.length, agent.length,
-                d_safe=cfg["stl"][agent.key], label=agent.key
+                x_var, traj_mean, ego.width, ego.length, agent.width, agent.length,
+                d_safe=d_safe, label=agent.key
             )
         else:
             cons, delta = safe_distance_walker(
                 x_var, traj_mean, ego.width, ego.length,
-                d_safe=cfg["stl"][agent.key], label=agent.key
+                d_safe=d_safe, label=agent.key
             )
 
         constraints += cons
         deltas[agent.key] = delta
 
 
-    # objective
-    objective = cp.Minimize(deltas["pedestrian"] + deltas["ambulance"] + deltas["parked_v1"] + deltas["parked_v2"])
+    # objective - penalize deviation from nominal trajectory
+    w_track = 0.1
+    w_safe = 10
+
+    tracking_cost = 0
+    for k in range(N + 1):
+        tracking_cost += cp.sum_squares(x_var[:2, k] - X_nom[k, :2])
+
+    # adjust weights to not force nominal
+    objective = cp.Minimize(w_safe * sum(deltas.values()) + w_track * tracking_cost)
+    # objective = cp.Minimize(sum(deltas.values()))
     prob = cp.Problem(objective, constraints)
 
     # select MIP solver
@@ -129,6 +148,10 @@ def build_and_solve_mpc(client, agents, cfg):
             "control": None,
             "deltas": None,
         }
+
+    # draw ego planned trajectory
+    ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
+    draw_sample_traj(client.world, ego_traj, color=COLORS["green"], life_time=0.1)
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)

@@ -27,9 +27,9 @@ mpc:
 
 stl:
   pedestrian: 2.0   # in meter
-  ambulance: 5.0
-  parked_v1: 1.0
-  parked_v2: 1.0
+  ambulance: 6.0
+  parked_v1: 1.5
+  parked_v2: 1.5
 
 
 ego_vehicle:
@@ -60,8 +60,8 @@ ambulance:
   blueprint: "vehicle.ford.ambulance"
   autopilot: True
   draw_route: False
-  behavior: "aggressive"
-  target_speed: 45
+  behavior: "normal"
+  target_speed: 40
   spawn:
     location: {x: -45.146, y: 90.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
@@ -77,7 +77,7 @@ ambulance:
   width: 2.35   
   length: 6.37 
 
-  # proximity: 3
+  proximity: 3
   std_acc: 0.1
   std_steer: 0.02
 
@@ -98,8 +98,8 @@ parked_v1:
   spawn:
     location: {x: -41.153, y: 43.561, z: 2.117}
     rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 2.16   
-  length: 4.79 
+  width: 1.97  
+  length: 3.81 
 
 
 parked_v2:
@@ -107,8 +107,8 @@ parked_v2:
   spawn:
     location: {x: -41.153, y: 48.561, z: 2.117}
     rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 2.16   
-  length: 4.79 
+  width: 1.79  
+  length: 3.71
 
 
 paths:

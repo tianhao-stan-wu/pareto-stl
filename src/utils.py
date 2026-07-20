@@ -23,8 +23,8 @@ class SmoothNoise:
         return self.value
 
 
+# opposite conventions between CARLA steer and bicycle model beta, negate to fix
 def bicycle_to_carla(u, acc_min, acc_max, beta_min, beta_max):
-    """Convert bicycle model [a, beta] to CARLA VehicleControl."""
     a, beta = u
     a = max(acc_min, min(a, acc_max))
     beta = max(beta_min, min(beta, beta_max))
@@ -41,20 +41,19 @@ def bicycle_to_carla(u, acc_min, acc_max, beta_min, beta_max):
 
     steer_angle = math.degrees(math.atan(2.0 * math.tan(beta)))
     max_steer = math.degrees(math.atan(2.0 * math.tan(beta_max)))
-    control.steer = max(-1.0, min(steer_angle / max_steer, 1.0))
+    control.steer = max(-1.0, min(steer_angle / max_steer, 1.0)) 
 
     return control
 
 
 def carla_to_bicycle(control, acc_min, acc_max, beta_min, beta_max):
-    """Convert CARLA VehicleControl to bicycle model [a, beta]."""
     if control.throttle > 0:
         a = control.throttle * acc_max
     else:
         a = -control.brake * abs(acc_min)
 
     max_steer_rad = math.radians(70.0)
-    steer_angle = control.steer * max_steer_rad
+    steer_angle = control.steer * max_steer_rad 
     beta = math.atan(0.5 * math.tan(steer_angle))
 
     a = max(acc_min, min(a, acc_max))
@@ -218,7 +217,7 @@ def main():
     parser.add_argument("-s", action="store_true", help="set spectator transform")
     parser.add_argument("-w", action="store_true", help="draw nearby waypoints")
     parser.add_argument("-a", action="store_true", help="get physical params of a vehicle")
-    parser.add_argument("--blueprint", type=str, default="vehicle.ford.ambulance",
+    parser.add_argument("--blueprint", type=str, default="vehicle.audi.a2",
                     help="blueprint for steer angle check (default: vehicle.tesla.model3)")
     args = parser.parse_args()
 
