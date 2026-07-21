@@ -52,7 +52,11 @@ def main():
     dt = cfg["carla"]["dt"]
     start_tick = int(cfg["mpc"]["sim_start"] / dt)
     end_tick = int(cfg["mpc"]["sim_end"] / dt)
+
     tick = 0
+
+    ego_warmup = cfg["ego_vehicle"]["warmup"]
+    amb_warmup = cfg["ambulance"]["warmup"]
 
     build_times = []
     solve_times = []
@@ -70,8 +74,8 @@ def main():
             # warmup: ego accelerates, amb full throttle to target speed
             if tick < start_tick:
                 # default step
-                ego.step(acc=cfg["ego_vehicle"]["warmup"])
-                amb.step(acc=cfg["ambulance"]["warmup"])
+                ego.step(acc=ego_warmup)
+                amb.step(acc=amb_warmup)
 
             # MPC phase
             elif tick <= end_tick:
@@ -91,13 +95,12 @@ def main():
                 print("End of simulation")
                 break
 
-
             tick += 1
 
     finally:
         save_timing(build_times, log_dir / "build_times.txt")
         save_timing(solve_times, log_dir / "solve_times.txt")
-        
+
         camera.stop()
         camera.destroy()
         client.quit(destroy=True)

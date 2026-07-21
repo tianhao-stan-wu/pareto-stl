@@ -86,7 +86,7 @@ ambulance:
   std_acc: 0.1
   std_steer: 0.02
 
-  warmup: 1.0
+  warmup: 0.95
 
 
 pedestrian:

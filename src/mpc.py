@@ -22,6 +22,14 @@ COLORS = {
     "black":   carla.Color(0, 0, 0),
 }
 
+MAP = {
+    "ambulance": "green",
+    "pedestrian": "red",
+    "parked_v1": "yellow",
+    "parked_v2": "orange"
+}
+
+
 
 def build_and_solve_mpc(client, agents, cfg):
 
@@ -99,7 +107,7 @@ def build_and_solve_mpc(client, agents, cfg):
     for i, agent in enumerate(agents[1:]):
 
         trajs = agent.sample_trajectories(N, dt, S)
-        draw_sample_traj(client.world, trajs, color=COLORS["red"], life_time=lt)
+        draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
 
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
