@@ -30,9 +30,7 @@ class Client:
         )
         set_spectator_transform(self.world, spectator)
 
-        # traffic_manager = self.client.get_trafficmanager(self.cfg["port"])
-        # # Make all vehicles ignore all traffic lights
-        # traffic_manager.ignore_traffic_lights(None, True)
+        self.world.tick()
 
 
     def _apply_settings(self):

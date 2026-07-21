@@ -4,9 +4,71 @@ import random
 import numpy as np
 import math
 
+import shutil
+from datetime import datetime
+from pathlib import Path
+
 
 # ------------------------------------------------------------------
-# import functions
+# logging
+# ------------------------------------------------------------------
+
+def setup_logging(cfg):
+    """Create log directory, save config copy, return paths."""
+    name = cfg["project"]["name"]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = Path(f"./logs/{name}_{timestamp}")
+    img_dir = log_dir / "imgs"
+    img_dir.mkdir(parents=True, exist_ok=True)
+
+    # save config copy
+    shutil.copy(f"configs/{name}.yaml", f"{log_dir}/{name}.yaml")
+
+    print(f"Logging to {log_dir}")
+    return log_dir, img_dir
+
+
+def setup_camera(world):
+    """Attach a persistent camera to the spectator."""
+    import queue
+
+    bp = world.get_blueprint_library().find("sensor.camera.rgb")
+    bp.set_attribute("image_size_x", "1920")
+    bp.set_attribute("image_size_y", "1080")
+    bp.set_attribute("fov", "90")
+
+    spectator = world.get_spectator()
+    camera = world.spawn_actor(bp, spectator.get_transform())
+
+    img_queue = queue.Queue()
+
+    return camera, img_queue
+
+
+def save_frame(img_queue, img_dir, tick, timeout=1.0):
+    """Save latest frame from persistent camera."""
+    import queue as q
+    try:
+        image = img_queue.get(timeout=timeout)
+        image.save_to_disk(str(img_dir / f"tick_{tick:05d}.png"))
+    except q.Empty:
+        print(f"Warning: no image at tick {tick}")
+
+
+def save_timing(times, path):
+    """Save timing list to file with stats on first line."""
+    avg = sum(times) / len(times)
+    lo = min(times)
+    hi = max(times)
+
+    with open(path, "w") as f:
+        f.write(f"avg={avg:.6f} min={lo:.6f} max={hi:.6f} n={len(times)}\n")
+        for t in times:
+            f.write(f"{t:.6f}\n")
+            
+
+# ------------------------------------------------------------------
+# import
 # ------------------------------------------------------------------
 
 class SmoothNoise:

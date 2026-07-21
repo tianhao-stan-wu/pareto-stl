@@ -1,7 +1,7 @@
 # configs/config.yaml
 
 project:
-  name: "STL_MOO_exp1"
+  name: "exp1"
   version: "0.9.15"
   seed: 42
 
@@ -11,7 +11,7 @@ carla:
   port: 2000
   timeout: 10.0
   map: "Town10HD"
-  dt: 0.05 
+  dt: 0.1 
   sync_mode: true
   spectator:
     location: {x: -60.227, y: 25.511, z: 14.917}
@@ -21,13 +21,16 @@ carla:
 mpc:
   horizon: 1    # planning horizon: T
   num_samples: 10  
-  sim_start: 5     # in second
-  sim_end: 9
+  sim_start: 4.5     # in second
+  sim_end: 12
+
+  w_safe: 10
+  w_control: 1
 
 
 stl:
   pedestrian: 2.0   # in meter
-  ambulance: 6.0
+  ambulance: 5.0
   parked_v1: 1.5
   parked_v2: 1.5
 
@@ -46,7 +49,7 @@ ego_vehicle:
     location: {x: -45.214, y: -3.398, z: 1}
     rotation: {pitch: -3.156, yaw: -85.004, roll: 0.000}
 
-  # dynamics params from utils.py
+  # dynamics params obtained from utils.py
   lr: 1.50
   acc_min: -10
   acc_max: 6
@@ -55,13 +58,15 @@ ego_vehicle:
   width: 2.16   
   length: 4.79 
 
+  warmup: 0.4
+
 
 ambulance:
   blueprint: "vehicle.ford.ambulance"
   autopilot: True
   draw_route: False
   behavior: "normal"
-  target_speed: 40
+  target_speed: 45
   spawn:
     location: {x: -45.146, y: 90.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
@@ -81,17 +86,18 @@ ambulance:
   std_acc: 0.1
   std_steer: 0.02
 
+  warmup: 1.0
+
 
 pedestrian:
   spawn:
     location: {x: -36.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
 
-  mean_speed: 4
+  mean_speed: 5
   std_speed: 1
   std_dir: 0.05
   
-
 
 parked_v1:
   blueprint: "vehicle.mini.cooper_s"  
@@ -112,8 +118,5 @@ parked_v2:
 
 
 paths:
-  carla_root: "./CARLA_0.9.15"
-  data_dir: "./data"
-  output_dir: "./data/output"
-  log_dir: "./data/logs"
-  checkpoint_dir: "./data/checkpoints"
+  log_dir: "./logs"
+

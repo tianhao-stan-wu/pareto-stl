@@ -53,7 +53,7 @@ def safe_distance_vehicle(
         constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
 
-    # constraints.append(delta <= d_safe)
+    constraints.append(delta <= d_safe)
 
     return constraints, delta
 

@@ -3,6 +3,7 @@ import numpy as np
 import cvxpy as cp
 import math
 import random
+import time
 
 from src.bicycle_model import KinematicBicycle
 from src.stl_constraints import safe_distance_vehicle, safe_distance_walker
@@ -23,10 +24,12 @@ COLORS = {
 
 
 def build_and_solve_mpc(client, agents, cfg):
+
     # extract parameters
     T = cfg["mpc"]["horizon"]
     dt = cfg["carla"]["dt"]
     N = int(round(T / dt))
+    lt = dt * 2
     S = cfg["mpc"]["num_samples"]
 
     # set up model
@@ -64,7 +67,9 @@ def build_and_solve_mpc(client, agents, cfg):
 
     # draw nominal trajectory in white
     nom_traj = X_nom[:, :2]  # (N+1, 2)
-    draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=0.1)
+    # draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=lt)
+
+    t_build_start = time.perf_counter()
 
     # cvxpy variables
     x_var = cp.Variable((4, N + 1), name="x")
@@ -94,10 +99,10 @@ def build_and_solve_mpc(client, agents, cfg):
     for i, agent in enumerate(agents[1:]):
 
         trajs = agent.sample_trajectories(N, dt, S)
+        draw_sample_traj(client.world, trajs, color=COLORS["red"], life_time=lt)
+
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
-
-        draw_sample_traj(client.world, trajs, color=COLORS["red"], life_time=0.1)
 
         if agent.key in ["parked_v1", "parked_v2", "ambulance"]:
             cons, delta = safe_distance_vehicle(
@@ -114,18 +119,16 @@ def build_and_solve_mpc(client, agents, cfg):
         deltas[agent.key] = delta
 
 
-    # objective - penalize deviation from nominal trajectory
-    w_track = 0.1
-    w_safe = 10
+    
+    w_safe = cfg["mpc"]["w_safe"]
+    w_control = cfg["mpc"]["w_control"]
+    control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
 
-    tracking_cost = 0
-    for k in range(N + 1):
-        tracking_cost += cp.sum_squares(x_var[:2, k] - X_nom[k, :2])
-
-    # adjust weights to not force nominal
-    objective = cp.Minimize(w_safe * sum(deltas.values()) + w_track * tracking_cost)
-    # objective = cp.Minimize(sum(deltas.values()))
+    # add small penalty for deviation from nominal control
+    objective = cp.Minimize(w_safe * sum(deltas.values()) + w_control * control_cost)
     prob = cp.Problem(objective, constraints)
+
+    t_build = time.perf_counter() - t_build_start
 
     # select MIP solver
     solver = None
@@ -139,19 +142,23 @@ def build_and_solve_mpc(client, agents, cfg):
             f"Installed: {cp.installed_solvers()}"
         )
 
+    t_solve_start = time.perf_counter()
     prob.solve(solver=solver, verbose=False)
+    t_solve = time.perf_counter() - t_solve_start
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-        print(f"Warning: solver returned status '{prob.status}'")
+        print(f"Warning: solver returned status '{prob.status}', apply nominal control")
         return {
             "status": False,
-            "control": None,
+            "control": control_nom,
             "deltas": None,
+            "t_build": t_build, 
+            "t_solve": t_solve,
         }
 
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
-    draw_sample_traj(client.world, ego_traj, color=COLORS["green"], life_time=0.1)
+    draw_sample_traj(client.world, ego_traj, color=COLORS["blue"], life_time=lt)
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
@@ -163,4 +170,6 @@ def build_and_solve_mpc(client, agents, cfg):
         "status": True,
         "control": control,
         "deltas": delta_values,
+        "t_build": t_build, 
+        "t_solve": t_solve,
     }
