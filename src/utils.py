@@ -28,7 +28,7 @@ def setup_logging(cfg):
     return log_dir, img_dir
 
 
-def setup_camera(world):
+def setup_camera(world, cfg):
     """Attach a persistent camera to the spectator."""
     import queue
 
@@ -37,8 +37,14 @@ def setup_camera(world):
     bp.set_attribute("image_size_y", "1080")
     bp.set_attribute("fov", "90")
 
-    spectator = world.get_spectator()
-    camera = world.spawn_actor(bp, spectator.get_transform())
+    loc = cfg["spectator"]["location"]
+    rot = cfg["spectator"]["rotation"]
+    spectator = carla.Transform(
+        carla.Location(x=loc["x"], y=loc["y"], z=loc["z"]),
+        carla.Rotation(pitch=rot["pitch"], yaw=rot["yaw"], roll=rot["roll"])
+    )
+
+    camera = world.spawn_actor(bp, spectator)
 
     img_queue = queue.Queue()
 

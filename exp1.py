@@ -15,7 +15,8 @@ from src.carla_client import Client
 from src.agents import Vehicle, Walker
 from src.utils import SmoothNoise, set_all_lights_green, print_distances, setup_logging
 from src.utils import setup_camera, save_frame, save_timing
-from src.mpc import build_and_solve_mpc
+from src.mpc_soft import build_and_solve_mpc_soft
+from src.mpc_hard import build_and_solve_mpc_hard
 
 
 def main():
@@ -34,7 +35,7 @@ def main():
     client = Client(cfg)
 
     # start camera
-    camera, img_queue = setup_camera(client.world)
+    camera, img_queue = setup_camera(client.world, cfg["carla"])
 
     # spawn vehicles
     ego = Vehicle(client.world, cfg, "ego_vehicle")
@@ -83,7 +84,11 @@ def main():
                 ped.random_step()
                 amb.random_step()
        
-                result = build_and_solve_mpc(client, agents, cfg)
+                if cfg["mpc"]["hard"]:
+                    result = build_and_solve_mpc_hard(client, agents, cfg)
+                else:
+                    result = build_and_solve_mpc_soft(client, agents, cfg)
+
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])

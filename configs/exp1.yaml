@@ -18,14 +18,17 @@ carla:
     rotation: {pitch: -34.466, yaw: 39.638, roll: 0.000}
 
 
+
 mpc:
   horizon: 1    # planning horizon: T
   num_samples: 10  
-  sim_start: 4.5     # in second
+  sim_start: 5     # in second
   sim_end: 12
 
   w_safe: 10
   w_control: 1
+
+  hard: True
 
 
 stl:

@@ -1,3 +1,7 @@
+"""
+mpc with stl constraints (with relaxation)
+"""
+
 import carla
 import numpy as np
 import cvxpy as cp
@@ -11,33 +15,33 @@ from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_
 
 
 COLORS = {
-    "red":     carla.Color(255, 0, 0),
-    "blue":    carla.Color(0, 0, 255),
-    "green":   carla.Color(0, 255, 0),
-    "yellow":  carla.Color(255, 255, 0),
-    "magenta": carla.Color(255, 0, 255),
-    "cyan":    carla.Color(0, 255, 255),
-    "orange":  carla.Color(255, 128, 0),
-    "white":   carla.Color(255, 255, 255),
-    "black":   carla.Color(0, 0, 0),
+    "red":     carla.Color(150, 0, 0),
+    "blue":    carla.Color(0, 0, 150),
+    "green":   carla.Color(0, 80, 0),
+    "yellow":  carla.Color(80, 80, 0),
+    "magenta": carla.Color(80, 0, 80),
+    "cyan":    carla.Color(0, 80, 80),
+    "orange":  carla.Color(80, 40, 0),
+    "white":   carla.Color(80, 80, 80),
 }
 
 MAP = {
-    "ambulance": "green",
+    "ego": "blue",
+    "ambulance": "magenta",
     "pedestrian": "red",
     "parked_v1": "yellow",
-    "parked_v2": "orange"
+    "parked_v2": "cyan"
 }
 
 
 
-def build_and_solve_mpc(client, agents, cfg):
+def build_and_solve_mpc_soft(client, agents, cfg):
 
     # extract parameters
     T = cfg["mpc"]["horizon"]
     dt = cfg["carla"]["dt"]
     N = int(round(T / dt))
-    lt = dt * 2
+    lt = dt * 1.5
     S = cfg["mpc"]["num_samples"]
 
     # set up model
@@ -58,7 +62,7 @@ def build_and_solve_mpc(client, agents, cfg):
     control_nom = ego.agent.run_step()
 
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
-    U_nom = np.tile([a_nom, beta_nom], (N, 1))
+    U_nom = np.tile([a_nom, 0], (N, 1))
 
     # nominal trajectory and linearization
     X_nom = np.zeros((N + 1, 4), dtype=float)
@@ -130,7 +134,8 @@ def build_and_solve_mpc(client, agents, cfg):
     
     w_safe = cfg["mpc"]["w_safe"]
     w_control = cfg["mpc"]["w_control"]
-    control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
+    # control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
+    control_cost = cp.sum_squares(u_var - U_nom.T)
 
     # add small penalty for deviation from nominal control
     objective = cp.Minimize(w_safe * sum(deltas.values()) + w_control * control_cost)
@@ -166,7 +171,7 @@ def build_and_solve_mpc(client, agents, cfg):
 
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
-    draw_sample_traj(client.world, ego_traj, color=COLORS["blue"], life_time=lt)
+    draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
