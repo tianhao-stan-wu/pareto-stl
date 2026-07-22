@@ -30,6 +30,7 @@ def safe_distance_vehicle(
 
     delta = cp.Variable(nonneg=True, name=f"delta_{label}")
     constraints = []
+    # binaries = []
 
     for k in range(N):
         ax = float(agent_traj[k, 0])
@@ -39,6 +40,8 @@ def safe_distance_vehicle(
         b_right = cp.Variable(boolean=True, name=f"b_{label}_right_k{k}")
         b_below = cp.Variable(boolean=True, name=f"b_{label}_below_k{k}")
         b_above = cp.Variable(boolean=True, name=f"b_{label}_above_k{k}")
+
+        # binaries.append({"left": b_left, "right": b_right, "below": b_below, "above": b_above})
 
         constraints.append(b_left + b_right + b_below + b_above >= 1)
 
@@ -53,9 +56,10 @@ def safe_distance_vehicle(
         constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
 
-    constraints.append(delta <= d_safe)
+    constraints.append(delta <= margin_y)
 
     return constraints, delta
+    # return constraints, delta, binaries
 
 
 def safe_distance_walker(

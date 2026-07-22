@@ -20,15 +20,16 @@ carla:
 
 
 mpc:
-  horizon: 1    # planning horizon: T
+  horizon: 2    # planning horizon: T
   num_samples: 10  
-  sim_start: 5     # in second
-  sim_end: 12
+  sim_start: 4.5     # in second
+  sim_end: 10
 
   w_safe: 10
   w_control: 1
+  w_smooth: 5
 
-  hard: True
+  hard: False
 
 
 stl:
@@ -89,7 +90,7 @@ ambulance:
   std_acc: 0.1
   std_steer: 0.02
 
-  warmup: 0.95
+  warmup: 1.0
 
 
 pedestrian:

@@ -34,7 +34,6 @@ MAP = {
 }
 
 
-
 def build_and_solve_mpc_soft(client, agents, cfg):
 
     # extract parameters
@@ -58,11 +57,17 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         math.sqrt(vel.x**2 + vel.y**2)
     ])
 
+    # center coordinates at ego's initial position
+    px_offset = ego_init[0]
+    py_offset = ego_init[1]
+    ego_init[0] = 0.0
+    ego_init[1] = 0.0
+
     # get nominal control from carla autopilot
     control_nom = ego.agent.run_step()
 
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
-    U_nom = np.tile([a_nom, 0], (N, 1))
+    U_nom = np.tile([a_nom, beta_nom], (N, 1))
 
     # nominal trajectory and linearization
     X_nom = np.zeros((N + 1, 4), dtype=float)
@@ -73,13 +78,10 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         A_k, B_k = model.linearize(X_nom[k], U_nom[k])
         X_nom[k + 1] = model.step(X_nom[k], U_nom[k])
         c_k = X_nom[k + 1] - A_k @ X_nom[k] - B_k @ U_nom[k]
+
         A_seq.append(A_k)
         B_seq.append(B_k)
         c_seq.append(c_k)
-
-    # draw nominal trajectory in white
-    nom_traj = X_nom[:, :2]  # (N+1, 2)
-    # draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=lt)
 
     t_build_start = time.perf_counter()
 
@@ -107,20 +109,26 @@ def build_and_solve_mpc_soft(client, agents, cfg):
 
     # add STL constraints
     deltas = {}
+    all_binaries = {}
 
     for i, agent in enumerate(agents[1:]):
 
         trajs = agent.sample_trajectories(N, dt, S)
         draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
 
+        # center agent trajectories
+        trajs[:, :, 0] -= px_offset
+        trajs[:, :, 1] -= py_offset
+
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
 
-        if agent.key in ["parked_v1", "parked_v2", "ambulance"]:
+        if agent.agent_type == "vehicle":
             cons, delta = safe_distance_vehicle(
-                x_var, traj_mean, ego.width, ego.length, agent.width, agent.length,
-                d_safe=d_safe, label=agent.key
+                x_var, traj_mean, ego.width, ego.length,
+                agent.width, agent.length, d_safe=d_safe, label=agent.key
             )
+            # all_binaries[agent.key] = bins
         else:
             cons, delta = safe_distance_walker(
                 x_var, traj_mean, ego.width, ego.length,
@@ -129,16 +137,38 @@ def build_and_solve_mpc_soft(client, agents, cfg):
 
         constraints += cons
         deltas[agent.key] = delta
-
-
     
+    # w_safe = cfg["mpc"]["w_safe"]
+    # w_control = cfg["mpc"]["w_control"]
+    # control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
+    # control_cost = cp.sum_squares(u_var - U_nom.T)
+    # control_cost = cp.norm(u_var - U_nom.T, 1)
+
     w_safe = cfg["mpc"]["w_safe"]
     w_control = cfg["mpc"]["w_control"]
-    # control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
-    control_cost = cp.sum_squares(u_var - U_nom.T)
+    w_smooth = cfg["mpc"]["w_smooth"]
 
-    # add small penalty for deviation from nominal control
-    objective = cp.Minimize(w_safe * sum(deltas.values()) + w_control * control_cost)
+    # control deviation from nominal
+    control_cost = cp.norm(u_var - U_nom.T, 1)
+
+    # control rate — penalize change between consecutive controls
+    control_rate = 0
+    for k in range(N - 1):
+        control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
+
+    # trajectory smoothness — penalize curvature (second derivative)
+    traj_smooth = 0
+    for k in range(1, N):
+        # x_{k+1} - 2*x_k + x_{k-1} ≈ acceleration in position
+        traj_smooth += cp.norm(x_var[:2, k+1] - 2 * x_var[:2, k] + x_var[:2, k-1], 1)
+
+    objective = cp.Minimize(
+        w_safe * sum(deltas.values())
+        + w_control * control_cost
+        + w_smooth * (control_rate + traj_smooth)
+    )
+    # objective = cp.Minimize(w_safe * sum(deltas.values()) + w_control * control_cost)
+    
     prob = cp.Problem(objective, constraints)
 
     t_build = time.perf_counter() - t_build_start
@@ -171,13 +201,18 @@ def build_and_solve_mpc_soft(client, agents, cfg):
 
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
+    ego_traj[:, 0] += px_offset
+    ego_traj[:, 1] += py_offset
     draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
 
+
     delta_values = {key: float(d.value) for key, d in deltas.items()}
     print(", ".join(f"{key}: {val:.3f}" for key, val in delta_values.items()))
+
+
 
     return {
         "status": True,
