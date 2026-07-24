@@ -1,5 +1,10 @@
 # STL Relaxation with MOO
 
+
+```bash
+sudo apt install ffmpeg
+```
+
 <!-- > One-line description of what this project does.
 
 ## Overview

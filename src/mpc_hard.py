@@ -58,11 +58,39 @@ def build_and_solve_mpc_hard(client, agents, cfg):
         math.sqrt(vel.x**2 + vel.y**2)
     ])
 
-    # get nominal control from carla autopilot
+    # get nominal control from autopilot + planned waypoints
     control_nom = ego.agent.run_step()
-
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
-    U_nom = np.tile([a_nom, 0], (N, 1))
+
+    plan = list(ego.agent.get_local_planner().get_plan())
+
+    U_nom = np.zeros((N, 2))
+    for k in range(N):
+        if k < len(plan) - 1:
+            wp_curr = plan[k][0].transform
+            wp_next = plan[k + 1][0].transform
+
+            dx = wp_next.location.x - wp_curr.location.x
+            dy = wp_next.location.y - wp_curr.location.y
+            yaw_next = math.atan2(dy, dx)
+
+            if k == 0:
+                dyaw = yaw_next - ego_init[2]
+            else:
+                wp_prev = plan[k - 1][0].transform
+                dx_p = wp_curr.location.x - wp_prev.location.x
+                dy_p = wp_curr.location.y - wp_prev.location.y
+                yaw_prev = math.atan2(dy_p, dx_p)
+                dyaw = yaw_next - yaw_prev
+
+            # estimate beta from heading change
+            v_est = max(ego_init[3] + a_nom * k * dt, 0.5)
+            beta_k = dyaw * ego.lr / (v_est * dt)
+            beta_k = max(ego.beta_min, min(beta_k, ego.beta_max))
+
+            U_nom[k] = [a_nom, beta_k]
+        else:
+            U_nom[k] = [a_nom, beta_nom]
 
     # nominal trajectory and linearization
     X_nom = np.zeros((N + 1, 4), dtype=float)
@@ -78,7 +106,7 @@ def build_and_solve_mpc_hard(client, agents, cfg):
         c_seq.append(c_k)
 
     # draw nominal trajectory in white
-    nom_traj = X_nom[:, :2]  # (N+1, 2)
+    # nom_traj = X_nom[:, :2]  # (N+1, 2)
     # draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=lt)
 
     t_build_start = time.perf_counter()

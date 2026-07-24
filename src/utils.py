@@ -20,7 +20,13 @@ def setup_logging(cfg):
     agents = cfg["project"]["agents"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     type = cfg["mpc"]["type"]
-    log_dir = Path(f"./logs/{agents}/{type}/{timestamp}")
+    density = cfg["mpc"]["density"]
+
+    if type != "pareto":
+        log_dir = Path(f"./logs/{agents}/{type}/{timestamp}")
+    else:
+        log_dir = Path(f"./logs/{agents}/{type}_d_{density}/{timestamp}")
+
     img_dir = log_dir / "imgs"
     img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,11 +87,11 @@ def save_stats(build_times, solve_times, num_constraints, num_variables, log_dir
             "n": len(solve_times),
             "values": solve_times,
         },
-        "num_constraints": num_constraints,
-        "num_variables": num_variables,
+        "num_constraints": int(num_constraints) if num_constraints is not None else None,
+        "num_variables": int(num_variables) if num_variables is not None else None,
     }
 
-    path = Path(log_dir) / "stats.json"
+    path = Path(log_dir) / "complexity.json"
     with open(path, "w") as f:
         json.dump(stats, f, indent=2)
 
@@ -98,13 +104,21 @@ def save_stats(build_times, solve_times, num_constraints, num_variables, log_dir
           f"max={stats['solve_times']['max']:.4f}s")
 
 
+def save_trajectories(agent_trajectories, log_dir):
+    """Save agent locations to locations.json."""
+    path = Path(log_dir) / "trajectory.json"
+    with open(path, "w") as f:
+        json.dump(agent_trajectories, f, indent=2)
+    print(f"Locations saved to {path}")
+
+
 def imgs_to_video(log_dir, fps=5):
     """Compile all images in log_dir/imgs into a video."""
     import subprocess
     from pathlib import Path
 
     img_dir = Path(log_dir) / "imgs"
-    output_path = Path(log_dir) / "experiment.mp4"
+    output_path = Path(log_dir) / "video.mp4"
 
     if not img_dir.exists():
         print(f"No imgs folder found in {log_dir}")
@@ -124,7 +138,105 @@ def imgs_to_video(log_dir, fps=5):
 
 
 # ------------------------------------------------------------------
-# import
+# STL robustness
+# ------------------------------------------------------------------
+
+def compute_and_save_robustness(agent_locations, d_safes, agent_dims, dt, log_dir):
+    """
+    Compute traditional STL and spatio-temporal robustness using box distance.
+    
+    Box distance: max(|dx| - margin_x, |dy| - margin_y)
+    If negative, ego is inside the safe box → violated.
+    
+    Traditional (min-max): ρ = min_t box_robustness(t)
+    Spatio-temporal:       ρ = Σ_t box_robustness(t) * dt
+    
+    Parameters
+    ----------
+    agent_locations : dict of {key: list of [x, y]}
+    d_safes : dict of {key: float}
+    agent_dims : dict of {key: {"width": float, "length": float}}
+    dt : float
+    log_dir : Path
+    """
+    ego_locs = np.array(agent_locations["ego_vehicle"])
+    ego_w = agent_dims["ego_vehicle"]["width"]
+    ego_l = agent_dims["ego_vehicle"]["length"]
+
+    min_max = {}
+    spatio_temporal = {}
+
+    for key, d_safe in d_safes.items():
+        if key == "ego_vehicle" or key not in agent_locations:
+            continue
+
+        agent_locs = np.array(agent_locations[key])
+        T = min(len(ego_locs), len(agent_locs))
+
+        dx = np.abs(ego_locs[:T, 0] - agent_locs[:T, 0])
+        dy = np.abs(ego_locs[:T, 1] - agent_locs[:T, 1])
+
+        if key in agent_dims:
+            veh_w = agent_dims[key]["width"]
+            veh_l = agent_dims[key]["length"]
+            margin_x = ego_w / 2.0 + veh_w / 2.0 + d_safe
+            margin_y = ego_l / 2.0 + veh_l / 2.0 + d_safe
+        else:
+            # walker — point object
+            margin_x = ego_w / 2.0 + d_safe
+            margin_y = ego_l / 2.0 + d_safe
+
+        # box robustness: min separation in any direction
+        # positive = outside safe box, negative = inside
+        ro_x = np.maximum(dx - margin_x, -d_safe)
+        ro_y = np.maximum(dy - margin_y, -d_safe)
+
+        # satisfied if EITHER x or y separation is enough
+        # robustness = max(ro_x, ro_y) at each timestep
+        ro = np.maximum(ro_x, ro_y)
+
+        # traditional: min over time
+        min_idx = int(np.argmin(ro))
+        rho_min = float(ro[min_idx])
+
+        min_max[key] = {
+            "robustness": rho_min,
+            "bool": rho_min >= 0,
+            "d_safe": d_safe,
+            "min_dx": float(dx[min_idx]),
+            "min_dy": float(dy[min_idx]),
+            "margin_x": float(margin_x),
+            "margin_y": float(margin_y),
+        }
+
+        # spatio-temporal: accumulated over time
+        rho_st = float(np.sum(ro) * dt)
+
+        spatio_temporal[key] = {
+            "robustness": rho_st,
+            "positive_ratio": float(np.mean(ro >= 0)),
+        }
+
+        status_mm = "✓" if rho_min >= 0 else "✗"
+        status_st = "✓" if rho_st >= 0 else "✗"
+        print(f"  {key}: min-max ρ={rho_min:+.3f} {status_mm}, "
+              f"spatio-temporal ρ={rho_st:+.3f} {status_st}")
+
+    results = {
+        "min-max": min_max,
+        "spatio-temporal": spatio_temporal,
+    }
+
+    path = Path(log_dir) / "robustness.json"
+    with open(path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"Robustness saved to {path}")
+    return results
+
+
+# ------------------------------------------------------------------
+# mpc
 # ------------------------------------------------------------------
 
 class SmoothNoise:
@@ -216,10 +328,11 @@ def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
     if color is None:
         color = carla.Color(255, 0, 0)
 
-    trajs = trajs[:5, :, :]
     trajs = np.asarray(trajs)
     if trajs.ndim == 2:
         trajs = trajs[np.newaxis]  # (N+1, 2) → (1, N+1, 2)
+    else:
+        trajs = trajs[:10, :, :]   # visualize 10 trajectories
 
     debug = world.debug
     S, N1, _ = trajs.shape
@@ -232,7 +345,7 @@ def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
 
 
 # ------------------------------------------------------------------
-# util functions (main)
+# carla world (callable in main)
 # ------------------------------------------------------------------
 
 def get_spectator_transform(world):

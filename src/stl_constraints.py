@@ -53,7 +53,7 @@ def safe_distance_vehicle_pareto(
         constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
 
-    constraints.append(delta <= d_safe)
+    # constraints.append(delta <= margin_y)
 
     return constraints, delta
 
@@ -109,7 +109,7 @@ def safe_distance_walker_pareto(
         constraints.append((ay - py) <= -(half_l + d_safe) + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  (half_l + d_safe) - delta - big_M * (1 - b_above))
 
-    constraints.append(delta <= d_safe)
+    # constraints.append(delta <= d_safe)
 
     return constraints, delta
 

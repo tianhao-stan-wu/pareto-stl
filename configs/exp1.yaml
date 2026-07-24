@@ -29,7 +29,7 @@ mpc:
   w_control: 1
   w_smooth: 5
 
-  type: "hard"
+  type: "pareto"
   density: 2
 
 

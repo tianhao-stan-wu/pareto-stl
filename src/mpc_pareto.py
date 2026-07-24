@@ -41,8 +41,6 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
     minimize one delta while constraining others <= epsilon.
     Returns Pareto front of solutions.
     """
-    
-    t_solve_start = time.perf_counter()
 
     # extract parameters
     T = cfg["mpc"]["horizon"]
@@ -66,14 +64,45 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
         math.sqrt(vel.x**2 + vel.y**2)
     ])
 
-    # nominal
+    # get nominal control from autopilot + planned waypoints
     control_nom = ego.agent.run_step()
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
-    U_nom = np.tile([a_nom, beta_nom], (N, 1))
 
+    plan = list(ego.agent.get_local_planner().get_plan())
+
+    U_nom = np.zeros((N, 2))
+    for k in range(N):
+        if k < len(plan) - 1:
+            wp_curr = plan[k][0].transform
+            wp_next = plan[k + 1][0].transform
+
+            dx = wp_next.location.x - wp_curr.location.x
+            dy = wp_next.location.y - wp_curr.location.y
+            yaw_next = math.atan2(dy, dx)
+
+            if k == 0:
+                dyaw = yaw_next - ego_init[2]
+            else:
+                wp_prev = plan[k - 1][0].transform
+                dx_p = wp_curr.location.x - wp_prev.location.x
+                dy_p = wp_curr.location.y - wp_prev.location.y
+                yaw_prev = math.atan2(dy_p, dx_p)
+                dyaw = yaw_next - yaw_prev
+
+            # estimate beta from heading change
+            v_est = max(ego_init[3] + a_nom * k * dt, 0.5)
+            beta_k = dyaw * ego.lr / (v_est * dt)
+            beta_k = max(ego.beta_min, min(beta_k, ego.beta_max))
+
+            U_nom[k] = [a_nom, beta_k]
+        else:
+            U_nom[k] = [a_nom, beta_nom]
+
+    # nominal trajectory and linearization
     X_nom = np.zeros((N + 1, 4), dtype=float)
     X_nom[0] = ego_init.copy()
     A_seq, B_seq, c_seq = [], [], []
+
     for k in range(N):
         A_k, B_k = model.linearize(X_nom[k], U_nom[k])
         X_nom[k + 1] = model.step(X_nom[k], U_nom[k])
@@ -82,6 +111,7 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
     # sample trajectories once — reuse for all solves
     agent_trajs = {}
+
     for agent in agents[1:]:
         trajs = agent.sample_trajectories(N, dt, S)
         draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
@@ -107,8 +137,15 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
     # iterate: minimize each delta, constrain the rest
     pareto_front = []
+    t_build_acc = 0
+    t_solve_acc = 0
+    num_constraints = None
+    num_variables = None
 
     for obj_key in agent_keys:
+
+        t_build_start = time.perf_counter()
+
         # grid over all OTHER deltas
         other_keys = [k for k in agent_keys if k != obj_key]
         other_grids = [epsilon_grids[k] for k in other_keys]
@@ -159,7 +196,8 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
                 if agent.key == obj_key:
                     # this is the objective — only bound by d_safe
-                    constraints.append(delta <= d_safe)
+                    # constraints.append(delta <= d_safe)
+                    pass
                 else:
                     # constrained by epsilon
                     constraints.append(delta <= eps_map[agent.key])
@@ -189,7 +227,22 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
             )
 
             prob = cp.Problem(objective, constraints)
+
+            # get number of constraints/variables
+            if num_constraints is None:
+                num_constraints = sum(c.size for c in constraints)
+            if num_variables is None:
+                num_variables = sum(v.size for v in prob.variables())
+                print(f"  Problem size: {num_constraints} constraints, {num_variables} variables")
+
+            t_build = time.perf_counter() - t_build_start
+
+            t_solve_start = time.perf_counter()
             prob.solve(solver=solver, verbose=False)
+            t_solve = time.perf_counter() - t_solve_start
+
+            t_build_acc += t_build
+            t_solve_acc += t_solve
 
             if prob.status in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
                 delta_values = {k: float(d.value) for k, d in deltas.items()}
@@ -223,8 +276,10 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
             "status": False,
             "control": control_nom,
             "deltas": None,
-            "t_build": 0,
-            "t_solve": t_solve,
+            "t_build": t_build_acc,
+            "t_solve": t_solve_acc,
+            "num_constraints": num_constraints,
+            "num_variables": num_variables,
         }
 
     # first: minimal pedestrian relaxation
@@ -238,8 +293,6 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
     ego_traj = best["x_opt"][:2, :].T
     draw_sample_traj(client.world, ego_traj, color=COLORS["blue"], life_time=lt)
 
-    t_solve = time.perf_counter() - t_solve_start
-
     delta_values = best["deltas"]
     print(f"Pareto front: {len(pareto_front)} points | "
           + ", ".join(f"{k}: {v:.3f}" for k, v in delta_values.items()) + f" | solve time: {t_solve}")
@@ -248,6 +301,8 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
         "status": True,
         "control": best["control"],
         "deltas": delta_values,
-        "t_build": 0,
-        "t_solve": t_solve,
+        "t_build": t_build_acc,
+        "t_solve": t_solve_acc,
+        "num_constraints": num_constraints,
+        "num_variables": num_variables,
     }

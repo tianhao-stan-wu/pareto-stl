@@ -14,7 +14,8 @@ from src.config import load_config
 from src.carla_client import Client
 from src.agents import Vehicle, Walker
 from src.utils import SmoothNoise, set_all_lights_green, print_distances, setup_logging
-from src.utils import setup_camera, save_frame, save_stats, imgs_to_video
+from src.utils import setup_camera, save_frame, save_stats, save_trajectories, imgs_to_video
+from src.utils import compute_and_save_robustness
 from src.mpc_soft import build_and_solve_mpc_soft
 from src.mpc_hard import build_and_solve_mpc_hard
 from src.mpc_pareto import build_and_solve_mpc_pareto
@@ -60,6 +61,8 @@ def main():
     num_constraints = None
     num_variables = None
 
+    agent_trajectories = {agent.key: [] for agent in agents}
+
     try:
         while True:
 
@@ -78,7 +81,11 @@ def main():
 
             # MPC phase
             elif tick <= end_tick:
-                # break
+
+                for agent in agents:
+                    loc = agent.get_transform().location
+                    agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
+                
                 ped.random_step()
                 amb.random_step()
        
@@ -115,6 +122,17 @@ def main():
         client.quit(destroy=True)
 
         save_stats(build_times, solve_times, num_constraints, num_variables, log_dir)
+        save_trajectories(agent_trajectories, log_dir)
+        
+        agent_dims = {}
+        for agent in agents:
+            if hasattr(agent, "width") and hasattr(agent, "length"):
+                agent_dims[agent.key] = {"width": agent.width, "length": agent.length}
+
+        compute_and_save_robustness(
+            agent_trajectories, cfg["stl"], agent_dims, cfg["carla"]["dt"], log_dir
+        )
+
         imgs_to_video(log_dir)
 
 
