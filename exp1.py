@@ -14,9 +14,10 @@ from src.config import load_config
 from src.carla_client import Client
 from src.agents import Vehicle, Walker
 from src.utils import SmoothNoise, set_all_lights_green, print_distances, setup_logging
-from src.utils import setup_camera, save_frame, save_timing
+from src.utils import setup_camera, save_frame, save_stats, imgs_to_video
 from src.mpc_soft import build_and_solve_mpc_soft
 from src.mpc_hard import build_and_solve_mpc_hard
+from src.mpc_pareto import build_and_solve_mpc_pareto
 
 
 def main():
@@ -40,13 +41,8 @@ def main():
     # spawn vehicles
     ego = Vehicle(client.world, cfg, "ego_vehicle")
     amb = Vehicle(client.world, cfg, "ambulance")
-    amb.agent._proximity_threshold = cfg["ambulance"]["proximity"]
-
     ped = Walker(client.world, cfg, "pedestrian")
-    p1 = Vehicle(client.world, cfg, "parked_v1")
-    p2 = Vehicle(client.world, cfg, "parked_v2")
-
-    agents = [ego, amb, ped, p1, p2]
+    agents = [ego, amb, ped]
 
     set_all_lights_green(client.world)
 
@@ -61,6 +57,8 @@ def main():
 
     build_times = []
     solve_times = []
+    num_constraints = None
+    num_variables = None
 
     try:
         while True:
@@ -80,19 +78,27 @@ def main():
 
             # MPC phase
             elif tick <= end_tick:
-
+                # break
                 ped.random_step()
                 amb.random_step()
        
-                if cfg["mpc"]["hard"]:
+                if cfg["mpc"]["type"] == "hard":
                     result = build_and_solve_mpc_hard(client, agents, cfg)
-                else:
+
+                elif cfg["mpc"]["type"] == "soft":
                     result = build_and_solve_mpc_soft(client, agents, cfg)
+                    
+                elif cfg["mpc"]["type"] == "pareto":
+                    result = build_and_solve_mpc_pareto(client, agents, cfg)
 
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])
                 solve_times.append(result["t_solve"])
+               
+                if num_constraints is None:
+                    num_constraints = result["num_constraints"]
+                    num_variables = result["num_variables"]
 
                 save_frame(img_queue, img_dir, tick - start_tick)
 
@@ -103,12 +109,13 @@ def main():
             tick += 1
 
     finally:
-        save_timing(build_times, log_dir / "build_times.txt")
-        save_timing(solve_times, log_dir / "solve_times.txt")
-
+        
         camera.stop()
         camera.destroy()
         client.quit(destroy=True)
+
+        save_stats(build_times, solve_times, num_constraints, num_variables, log_dir)
+        imgs_to_video(log_dir)
 
 
 if __name__ == "__main__":

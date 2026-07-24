@@ -10,7 +10,7 @@ import random
 import time
 
 from src.bicycle_model import KinematicBicycle
-from src.stl_constraints import safe_distance_vehicle, safe_distance_walker
+from src.stl_constraints import safe_distance_vehicle_soft, safe_distance_walker_soft
 from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_bicycle
 
 
@@ -30,7 +30,8 @@ MAP = {
     "ambulance": "magenta",
     "pedestrian": "red",
     "parked_v1": "yellow",
-    "parked_v2": "cyan"
+    "parked_v2": "cyan",
+    "opposite_v1": "green"
 }
 
 
@@ -57,17 +58,39 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         math.sqrt(vel.x**2 + vel.y**2)
     ])
 
-    # center coordinates at ego's initial position
-    px_offset = ego_init[0]
-    py_offset = ego_init[1]
-    ego_init[0] = 0.0
-    ego_init[1] = 0.0
-
-    # get nominal control from carla autopilot
+    # get nominal control from autopilot + planned waypoints
     control_nom = ego.agent.run_step()
-
     a_nom, beta_nom = carla_to_bicycle(control_nom, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
-    U_nom = np.tile([a_nom, beta_nom], (N, 1))
+
+    plan = list(ego.agent.get_local_planner().get_plan())
+
+    U_nom = np.zeros((N, 2))
+    for k in range(N):
+        if k < len(plan) - 1:
+            wp_curr = plan[k][0].transform
+            wp_next = plan[k + 1][0].transform
+
+            dx = wp_next.location.x - wp_curr.location.x
+            dy = wp_next.location.y - wp_curr.location.y
+            yaw_next = math.atan2(dy, dx)
+
+            if k == 0:
+                dyaw = yaw_next - ego_init[2]
+            else:
+                wp_prev = plan[k - 1][0].transform
+                dx_p = wp_curr.location.x - wp_prev.location.x
+                dy_p = wp_curr.location.y - wp_prev.location.y
+                yaw_prev = math.atan2(dy_p, dx_p)
+                dyaw = yaw_next - yaw_prev
+
+            # estimate beta from heading change
+            v_est = max(ego_init[3] + a_nom * k * dt, 0.5)
+            beta_k = dyaw * ego.lr / (v_est * dt)
+            beta_k = max(ego.beta_min, min(beta_k, ego.beta_max))
+
+            U_nom[k] = [a_nom, beta_k]
+        else:
+            U_nom[k] = [a_nom, beta_nom]
 
     # nominal trajectory and linearization
     X_nom = np.zeros((N + 1, 4), dtype=float)
@@ -78,10 +101,12 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         A_k, B_k = model.linearize(X_nom[k], U_nom[k])
         X_nom[k + 1] = model.step(X_nom[k], U_nom[k])
         c_k = X_nom[k + 1] - A_k @ X_nom[k] - B_k @ U_nom[k]
-
         A_seq.append(A_k)
         B_seq.append(B_k)
         c_seq.append(c_k)
+
+    # nom_traj = X_nom[:, :2]  # (N+1, 2)
+    # draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=lt)
 
     t_build_start = time.perf_counter()
 
@@ -116,21 +141,17 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         trajs = agent.sample_trajectories(N, dt, S)
         draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
 
-        # center agent trajectories
-        trajs[:, :, 0] -= px_offset
-        trajs[:, :, 1] -= py_offset
-
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
 
         if agent.agent_type == "vehicle":
-            cons, delta = safe_distance_vehicle(
+            cons, delta = safe_distance_vehicle_soft(
                 x_var, traj_mean, ego.width, ego.length,
                 agent.width, agent.length, d_safe=d_safe, label=agent.key
             )
             # all_binaries[agent.key] = bins
         else:
-            cons, delta = safe_distance_walker(
+            cons, delta = safe_distance_walker_soft(
                 x_var, traj_mean, ego.width, ego.length,
                 d_safe=d_safe, label=agent.key
             )
@@ -159,7 +180,6 @@ def build_and_solve_mpc_soft(client, agents, cfg):
     # trajectory smoothness — penalize curvature (second derivative)
     traj_smooth = 0
     for k in range(1, N):
-        # x_{k+1} - 2*x_k + x_{k-1} ≈ acceleration in position
         traj_smooth += cp.norm(x_var[:2, k+1] - 2 * x_var[:2, k] + x_var[:2, k-1], 1)
 
     objective = cp.Minimize(
@@ -167,7 +187,7 @@ def build_and_solve_mpc_soft(client, agents, cfg):
         + w_control * control_cost
         + w_smooth * (control_rate + traj_smooth)
     )
-    # objective = cp.Minimize(w_safe * sum(deltas.values()) + w_control * control_cost)
+    # objective = cp.Minimize(sum(deltas.values()))
     
     prob = cp.Problem(objective, constraints)
 
@@ -201,8 +221,6 @@ def build_and_solve_mpc_soft(client, agents, cfg):
 
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
-    ego_traj[:, 0] += px_offset
-    ego_traj[:, 1] += py_offset
     draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
 
     a, beta = u_var.value[:, 0]

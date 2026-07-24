@@ -3,6 +3,7 @@ import carla
 import random
 import numpy as np
 import math
+import json
 
 import shutil
 from datetime import datetime
@@ -16,8 +17,10 @@ from pathlib import Path
 def setup_logging(cfg):
     """Create log directory, save config copy, return paths."""
     name = cfg["project"]["name"]
+    agents = cfg["project"]["agents"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = Path(f"./logs/{name}_{timestamp}")
+    type = cfg["mpc"]["type"]
+    log_dir = Path(f"./logs/{agents}/{type}/{timestamp}")
     img_dir = log_dir / "imgs"
     img_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,17 +64,64 @@ def save_frame(img_queue, img_dir, tick, timeout=1.0):
         print(f"Warning: no image at tick {tick}")
 
 
-def save_timing(times, path):
-    """Save timing list to file with stats on first line."""
-    avg = sum(times) / len(times)
-    lo = min(times)
-    hi = max(times)
+def save_stats(build_times, solve_times, num_constraints, num_variables, log_dir):
+    """Save timing and problem size stats to stats.json."""
+    stats = {
+        "build_times": {
+            "avg": sum(build_times) / len(build_times),
+            "min": min(build_times),
+            "max": max(build_times),
+            "n": len(build_times),
+            "values": build_times,
+        },
+        "solve_times": {
+            "avg": sum(solve_times) / len(solve_times),
+            "min": min(solve_times),
+            "max": max(solve_times),
+            "n": len(solve_times),
+            "values": solve_times,
+        },
+        "num_constraints": num_constraints,
+        "num_variables": num_variables,
+    }
 
+    path = Path(log_dir) / "stats.json"
     with open(path, "w") as f:
-        f.write(f"avg={avg:.6f} min={lo:.6f} max={hi:.6f} n={len(times)}\n")
-        for t in times:
-            f.write(f"{t:.6f}\n")
-            
+        json.dump(stats, f, indent=2)
+
+    print(f"Stats saved to {path}")
+    print(f"  Build: avg={stats['build_times']['avg']:.4f}s, "
+          f"min={stats['build_times']['min']:.4f}s, "
+          f"max={stats['build_times']['max']:.4f}s")
+    print(f"  Solve: avg={stats['solve_times']['avg']:.4f}s, "
+          f"min={stats['solve_times']['min']:.4f}s, "
+          f"max={stats['solve_times']['max']:.4f}s")
+
+
+def imgs_to_video(log_dir, fps=5):
+    """Compile all images in log_dir/imgs into a video."""
+    import subprocess
+    from pathlib import Path
+
+    img_dir = Path(log_dir) / "imgs"
+    output_path = Path(log_dir) / "experiment.mp4"
+
+    if not img_dir.exists():
+        print(f"No imgs folder found in {log_dir}")
+        return
+
+    subprocess.run([
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", str(img_dir / "tick_%05d.png"),
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", "18",
+        output_path
+    ], check=True)
+
+    print(f"Video saved to {output_path}")            
+
 
 # ------------------------------------------------------------------
 # import
@@ -166,6 +216,7 @@ def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
     if color is None:
         color = carla.Color(255, 0, 0)
 
+    trajs = trajs[:5, :, :]
     trajs = np.asarray(trajs)
     if trajs.ndim == 2:
         trajs = trajs[np.newaxis]  # (N+1, 2) → (1, N+1, 2)
@@ -287,7 +338,13 @@ def main():
     parser.add_argument("-a", action="store_true", help="get physical params of a vehicle")
     parser.add_argument("--blueprint", type=str, default="vehicle.audi.a2",
                     help="blueprint for steer angle check (default: vehicle.tesla.model3)")
+
+    parser.add_argument("--log_dir", type=str, help="path to logs folder")
+    parser.add_argument("--fps", type=int, default=5)
+    parser.add_argument("-v", action="store_true", help="save video")
+
     args = parser.parse_args()
+
 
     client = carla.Client("127.0.0.1", 2000)
     client.set_timeout(10.0)
@@ -316,6 +373,9 @@ def main():
         get_lr_lf(actor)
         get_dimensions(actor)
         actor.destroy()
+
+    if args.v:
+        imgs_to_video(args.log_dir, args.fps)
 
 
 if __name__ == '__main__':

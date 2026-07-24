@@ -135,6 +135,11 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     objective = cp.Minimize(control_cost)
     prob = cp.Problem(objective, constraints)
 
+    # get number of constraints/variables
+    num_constraints = sum(c.size for c in constraints)
+    num_variables = sum(v.size for v in prob.variables())
+    print(f"  Problem size: {num_constraints} constraints, {num_variables} variables")
+
     t_build = time.perf_counter() - t_build_start
 
     # select MIP solver
@@ -161,6 +166,8 @@ def build_and_solve_mpc_hard(client, agents, cfg):
             "deltas": None,
             "t_build": t_build, 
             "t_solve": t_solve,
+            "num_constraints": num_constraints,
+            "num_variables": num_variables,
         }
 
     # draw ego planned trajectory
@@ -176,4 +183,6 @@ def build_and_solve_mpc_hard(client, agents, cfg):
         "deltas": None,
         "t_build": t_build, 
         "t_solve": t_solve,
+        "num_constraints": num_constraints,
+        "num_variables": num_variables,
     }

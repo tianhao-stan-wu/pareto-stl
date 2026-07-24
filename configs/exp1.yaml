@@ -2,6 +2,7 @@
 
 project:
   name: "exp1"
+  agents: "amb_ped"
   version: "0.9.15"
   seed: 42
 
@@ -18,25 +19,23 @@ carla:
     rotation: {pitch: -34.466, yaw: 39.638, roll: 0.000}
 
 
-
 mpc:
   horizon: 2    # planning horizon: T
-  num_samples: 10  
-  sim_start: 4.5     # in second
-  sim_end: 10
+  num_samples: 100  
+  sim_start: 5     # in second
+  sim_end: 9
 
   w_safe: 10
   w_control: 1
   w_smooth: 5
 
-  hard: False
+  type: "hard"
+  density: 2
 
 
 stl:
-  pedestrian: 2.0   # in meter
+  pedestrian: 3.0   # in meter
   ambulance: 5.0
-  parked_v1: 1.5
-  parked_v2: 1.5
 
 
 ego_vehicle:
@@ -57,8 +56,8 @@ ego_vehicle:
   lr: 1.50
   acc_min: -10
   acc_max: 6
-  beta_min: -0.5
-  beta_max: 0.5
+  beta_min: -0.133    # steer in [-15, 15] degrees
+  beta_max: 0.133
   width: 2.16   
   length: 4.79 
 
@@ -86,7 +85,6 @@ ambulance:
   width: 2.35   
   length: 6.37 
 
-  proximity: 3
   std_acc: 0.1
   std_steer: 0.02
 
@@ -98,28 +96,10 @@ pedestrian:
     location: {x: -36.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
 
-  mean_speed: 5
+  mean_speed: 6
   std_speed: 1
   std_dir: 0.05
   
-
-parked_v1:
-  blueprint: "vehicle.mini.cooper_s"  
-  spawn:
-    location: {x: -41.153, y: 43.561, z: 2.117}
-    rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 1.97  
-  length: 3.81 
-
-
-parked_v2:
-  blueprint: "vehicle.audi.a2"
-  spawn:
-    location: {x: -41.153, y: 48.561, z: 2.117}
-    rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 1.79  
-  length: 3.71
-
 
 paths:
   log_dir: "./logs"
