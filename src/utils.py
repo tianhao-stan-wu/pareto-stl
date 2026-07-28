@@ -112,7 +112,7 @@ def save_trajectories(agent_trajectories, log_dir):
     print(f"Locations saved to {path}")
 
 
-def imgs_to_video(log_dir, fps=5):
+def imgs_to_video(log_dir, fps=10):
     """Compile all images in log_dir/imgs into a video."""
     import subprocess
     from pathlib import Path
@@ -141,87 +141,114 @@ def imgs_to_video(log_dir, fps=5):
 # STL robustness
 # ------------------------------------------------------------------
 
-def compute_and_save_robustness(agent_locations, d_safes, agent_dims, dt, log_dir):
+def compute_and_save_robustness(agent_locations, stl_cfg, agent_dims, dt, log_dir):
     """
-    Compute traditional STL and spatio-temporal robustness using box distance.
-    
-    Box distance: max(|dx| - margin_x, |dy| - margin_y)
-    If negative, ego is inside the safe box → violated.
-    
-    Traditional (min-max): ρ = min_t box_robustness(t)
-    Spatio-temporal:       ρ = Σ_t box_robustness(t) * dt
-    
-    Parameters
-    ----------
-    agent_locations : dict of {key: list of [x, y]}
-    d_safes : dict of {key: float}
-    agent_dims : dict of {key: {"width": float, "length": float}}
-    dt : float
-    log_dir : Path
+    Compute traditional STL and spatio-temporal robustness for all 5 STL specs:
+    (1) safe distance with pedestrian
+    (2) safe distance with ambulance
+    (3) avoid vehicle rectangle
+    (4) avoid opposite lane rectangle
+    (5) stop before intersection y-line
     """
     ego_locs = np.array(agent_locations["ego_vehicle"])
     ego_w = agent_dims["ego_vehicle"]["width"]
     ego_l = agent_dims["ego_vehicle"]["length"]
+    T = len(ego_locs)
 
     min_max = {}
     spatio_temporal = {}
 
-    for key, d_safe in d_safes.items():
-        if key == "ego_vehicle" or key not in agent_locations:
+    # ------------------------------------------------------------------
+    # (1) (2) Safe distance with pedestrian and ambulance
+    # ------------------------------------------------------------------
+    for key in ["pedestrian", "ambulance"]:
+        if key not in agent_locations or key not in stl_cfg:
             continue
 
+        d_safe = stl_cfg[key]
         agent_locs = np.array(agent_locations[key])
-        T = min(len(ego_locs), len(agent_locs))
+        T_k = min(T, len(agent_locs))
 
-        dx = np.abs(ego_locs[:T, 0] - agent_locs[:T, 0])
-        dy = np.abs(ego_locs[:T, 1] - agent_locs[:T, 1])
+        dx = np.abs(ego_locs[:T_k, 0] - agent_locs[:T_k, 0])
+        dy = np.abs(ego_locs[:T_k, 1] - agent_locs[:T_k, 1])
 
         if key in agent_dims:
-            veh_w = agent_dims[key]["width"]
-            veh_l = agent_dims[key]["length"]
-            margin_x = ego_w / 2.0 + veh_w / 2.0 + d_safe
-            margin_y = ego_l / 2.0 + veh_l / 2.0 + d_safe
+            margin_x = ego_w / 2.0 + agent_dims[key]["width"] / 2.0 + d_safe
+            margin_y = ego_l / 2.0 + agent_dims[key]["length"] / 2.0 + d_safe
         else:
-            # walker — point object
             margin_x = ego_w / 2.0 + d_safe
             margin_y = ego_l / 2.0 + d_safe
 
-        # box robustness: min separation in any direction
-        # positive = outside safe box, negative = inside
         ro_x = np.maximum(dx - margin_x, -d_safe)
         ro_y = np.maximum(dy - margin_y, -d_safe)
-
-        # satisfied if EITHER x or y separation is enough
-        # robustness = max(ro_x, ro_y) at each timestep
         ro = np.maximum(ro_x, ro_y)
 
-        # traditional: min over time
         min_idx = int(np.argmin(ro))
-        rho_min = float(ro[min_idx])
+        min_max[key] = {"robustness": float(ro[min_idx])}
 
-        min_max[key] = {
-            "robustness": rho_min,
-            "bool": rho_min >= 0,
-            "d_safe": d_safe,
-            "min_dx": float(dx[min_idx]),
-            "min_dy": float(dy[min_idx]),
-            "margin_x": float(margin_x),
-            "margin_y": float(margin_y),
-        }
-
-        # spatio-temporal: accumulated over time
-        rho_st = float(np.sum(ro) * dt)
-
+        violations = np.minimum(ro, 0.0)
         spatio_temporal[key] = {
-            "robustness": rho_st,
-            "positive_ratio": float(np.mean(ro >= 0)),
+            "robustness": float(np.sum(violations) * dt),
+            "num_violations": int(np.sum(ro < 0)),
+            "total_steps": int(T),
         }
 
-        status_mm = "✓" if rho_min >= 0 else "✗"
-        status_st = "✓" if rho_st >= 0 else "✗"
-        print(f"  {key}: min-max ρ={rho_min:+.3f} {status_mm}, "
-              f"spatio-temporal ρ={rho_st:+.3f} {status_st}")
+    # ------------------------------------------------------------------
+    # (3) Avoid vehicle rectangle
+    # (4) Avoid opposite lane rectangle
+    # ------------------------------------------------------------------
+    for rect_key, label in [("vehicles", "vehicles_rect"), ("lane", "lane_rect")]:
+        if rect_key not in stl_cfg:
+            continue
 
+        rect = stl_cfg[rect_key]
+        x_min, x_max = rect["x_min"], rect["x_max"]
+        y_min, y_max = rect["y_min"], rect["y_max"]
+
+        dx_min = ego_locs[:T, 0] - x_min  # distance from left edge
+        dx_max = x_max - ego_locs[:T, 0]  # distance from right edge
+        dy_min = ego_locs[:T, 1] - y_min  # distance from bottom edge
+        dy_max = y_max - ego_locs[:T, 1]  # distance from top edge
+
+        inside_x = np.minimum(dx_min, dx_max)  # min distance to x-edge
+        inside_y = np.minimum(dy_min, dy_max)  # min distance to y-edge
+        penetration = np.minimum(inside_x, inside_y)  # min over both axes
+
+        ro = -penetration
+
+        min_idx = int(np.argmin(ro))
+        min_max[label] = {"robustness": float(ro[min_idx])}
+
+        violations = np.minimum(ro, 0.0)
+        spatio_temporal[label] = {
+            "robustness": float(np.sum(violations) * dt),
+            "num_violations": int(np.sum(ro < 0)),
+            "total_steps": int(T),
+        }
+
+    # ------------------------------------------------------------------
+    # (5) Stop before intersection y-line
+    # ------------------------------------------------------------------
+    if "intersection_y" in stl_cfg:
+        y_line = stl_cfg["intersection_y"]
+
+        # robustness: how far ego is from crossing the line
+        # positive = ego is above y_line (safe), negative = crossed
+        ro = ego_locs[:T, 1] - y_line
+
+        min_idx = int(np.argmin(ro))
+        min_max["intersection"] = {"robustness": float(ro[min_idx])}
+
+        violations = np.minimum(ro, 0.0)
+        spatio_temporal["intersection"] = {
+            "robustness": float(np.sum(violations) * dt),
+            "num_violations": int(np.sum(ro < 0)),
+            "total_steps": int(T),
+        }
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
     results = {
         "min-max": min_max,
         "spatio-temporal": spatio_temporal,
@@ -231,13 +258,47 @@ def compute_and_save_robustness(agent_locations, d_safes, agent_dims, dt, log_di
     with open(path, "w") as f:
         json.dump(results, f, indent=2)
 
-    print(f"Robustness saved to {path}")
-    return results
+    print(f"\nRobustness saved to {path}")
+
+    summary_path = Path(log_dir) / "robustness_summary.txt"
+    with open(summary_path, "w") as f:
+        f.write("STL Robustness Summary\n")
+        f.write(f"  {'spec':<20} {'min-max':>10} {'spatio-temp':>12} {'violations':>12}\n")
+        f.write(f"  {'-'*56}\n")
+        for key in min_max:
+            rho_mm = min_max[key]["robustness"]
+            rho_st = spatio_temporal[key]["robustness"]
+            n_viol = spatio_temporal[key]["num_violations"]
+            total = spatio_temporal[key]["total_steps"]
+            status = "✓" if rho_mm >= 0 else "✗"
+            line = f"  {key:<20} {rho_mm:>+10.3f} {rho_st:>+12.3f} {n_viol:>5}/{total:<5} {status}\n"
+            f.write(line)
+
+    print(f"Summary saved to {summary_path}")
 
 
 # ------------------------------------------------------------------
 # mpc
 # ------------------------------------------------------------------
+COLORS = {
+    "red":     carla.Color(10, 0, 0),
+    "blue":    carla.Color(0, 0, 10),
+    "green":   carla.Color(0, 10, 0),
+    "yellow":  carla.Color(80, 80, 0),
+    "magenta": carla.Color(80, 0, 80),
+    "cyan":    carla.Color(0, 80, 80),
+    "orange":  carla.Color(80, 40, 0),
+    "white":   carla.Color(80, 80, 80),
+}
+
+MAP = {
+    "ego": "blue",
+    "ambulance": "magenta",
+    "pedestrian": "red",
+    "parked_v1": "yellow",
+    "parked_v2": "cyan"
+}
+
 
 class SmoothNoise:
     """Ornstein-Uhlenbeck process for smooth random noise."""
@@ -343,6 +404,59 @@ def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
             end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=0.5)
             debug.draw_line(start, end, thickness=size, color=color, life_time=life_time)
 
+
+def draw_rectangle_boundary(
+    world: carla.World,
+    rect,
+    z: float = 0.2,
+    color: carla.Color = carla.Color(255, 0, 0),
+    thickness: float = 0.05,
+    life_time: float = 1,
+):
+    """
+    Draw the boundary of an axis-aligned rectangle in CARLA.
+
+    Parameters
+    ----------
+    world : carla.World
+    rect : [x_min, x_max, y_min, y_max]
+    z : float
+        Height at which to draw the rectangle.
+    color : carla.Color
+    thickness : float
+    life_time : float
+        0.0 means persistent until the simulator resets.
+    """
+
+    x_min, x_max, y_min, y_max = rect
+
+    # Rectangle corners
+    p1 = carla.Location(x=x_min, y=y_min, z=z)
+    p2 = carla.Location(x=x_max, y=y_min, z=z)
+    p3 = carla.Location(x=x_max, y=y_max, z=z)
+    p4 = carla.Location(x=x_min, y=y_max, z=z)
+
+    debug = world.debug
+
+    debug.draw_line(p1, p2,
+                    thickness=thickness,
+                    color=color,
+                    life_time=life_time)
+
+    debug.draw_line(p2, p3,
+                    thickness=thickness,
+                    color=color,
+                    life_time=life_time)
+
+    debug.draw_line(p3, p4,
+                    thickness=thickness,
+                    color=color,
+                    life_time=life_time)
+
+    debug.draw_line(p4, p1,
+                    thickness=thickness,
+                    color=color,
+                    life_time=life_time)
 
 # ------------------------------------------------------------------
 # carla world (callable in main)
@@ -453,7 +567,7 @@ def main():
                     help="blueprint for steer angle check (default: vehicle.tesla.model3)")
 
     parser.add_argument("--log_dir", type=str, help="path to logs folder")
-    parser.add_argument("--fps", type=int, default=5)
+    parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("-v", action="store_true", help="save video")
 
     args = parser.parse_args()

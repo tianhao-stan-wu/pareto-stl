@@ -116,11 +116,18 @@ class Vehicle:
             control.brake = min(abs(acc), 1.0)
 
         control.steer = max(-1.0, min(control.steer + self._steer_noise.sample(), 1.0))
+        self._clamp_control(control)
         self.actor.apply_control(control)
 
     def apply_control(self, control: carla.VehicleControl):
         """Manually apply control."""
         self.actor.apply_control(control)
+
+    def _clamp_control(self, control: carla.VehicleControl):
+        """Clamp steering to beta bounds."""
+        max_steer_rad = math.radians(70.0)
+        max_steer = math.atan(2.0 * math.tan(self.beta_max)) / max_steer_rad
+        control.steer = max(-max_steer, min(control.steer, max_steer))
 
     # ------------------------------------------------------------------
     # Queries
@@ -143,53 +150,6 @@ class Vehicle:
     # ------------------------------------------------------------------
     # Sampling
     # ------------------------------------------------------------------
-
-    # def sample_trajectories(self, N: int, dt: float, S: int) -> np.ndarray:
-    #     """Sample S trajectories with smooth noise. Returns (S, N+1, 2)."""
-    #     tf = self.get_transform()
-    #     px0, py0 = tf.location.x, tf.location.y
-    #     yaw0 = math.radians(tf.rotation.yaw)
-    #     speed0 = self.get_speed() / 3.6
-    #     max_steer_rad = math.radians(70.0)
-
-    #     # no autopilot — return stationary trajectory
-    #     if self.agent is None:
-    #         trajs = np.zeros((S, N + 1, 2))
-    #         trajs[:, :, 0] = px0
-    #         trajs[:, :, 1] = py0
-    #         return trajs
-
-    #     control = self.agent.run_step()
-    #     base_throttle = control.throttle
-    #     base_steer = control.steer
-
-    #     trajs = np.zeros((S, N + 1, 2))
-
-    #     for s in range(S):
-    #         px, py, yaw, speed = px0, py0, yaw0, speed0
-    #         acc_noise = SmoothNoise(mean=0.0, theta=0.3, sigma=self.std_acc)
-    #         steer_noise = SmoothNoise(mean=0.0, theta=0.5, sigma=self.std_steer)
-
-    #         trajs[s, 0] = [px, py]
-
-    #         for k in range(N):
-    #             acc = base_throttle + acc_noise.sample()
-    #             if acc >= 0:
-    #                 a = min(acc, 1.0) * self.acc_max
-    #             else:
-    #                 a = -min(abs(acc), 1.0) * abs(self.acc_min)
-
-    #             steer = max(-1.0, min(base_steer + steer_noise.sample(), 1.0))
-    #             beta = math.atan(0.5 * math.tan(steer * max_steer_rad))
-
-    #             speed += a * dt
-    #             speed = max(0.0, speed)
-    #             yaw += (speed / self.lr) * beta * dt
-    #             px += speed * math.cos(yaw) * dt
-    #             py += speed * math.sin(yaw) * dt
-    #             trajs[s, k + 1] = [px, py]
-
-    #     return trajs
 
     def sample_trajectories(self, N: int, dt: float, S: int) -> np.ndarray:
         tf = self.get_transform()

@@ -10,29 +10,14 @@ import random
 import time
 
 from src.bicycle_model import KinematicBicycle
-from src.stl_constraints import safe_distance_vehicle_hard, safe_distance_walker_hard
-from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_bicycle
-
-
-COLORS = {
-    "red":     carla.Color(150, 0, 0),
-    "blue":    carla.Color(0, 0, 150),
-    "green":   carla.Color(0, 80, 0),
-    "yellow":  carla.Color(80, 80, 0),
-    "magenta": carla.Color(80, 0, 80),
-    "cyan":    carla.Color(0, 80, 80),
-    "orange":  carla.Color(80, 40, 0),
-    "white":   carla.Color(80, 80, 80),
-}
-
-MAP = {
-    "ego": "blue",
-    "ambulance": "magenta",
-    "pedestrian": "red",
-    "parked_v1": "yellow",
-    "parked_v2": "cyan"
-}
-
+from src.stl_constraints_hard import (
+    safe_distance_vehicle_hard, safe_distance_walker_hard, avoid_rectangle_hard,
+    stay_below_line_hard
+)
+from src.utils import (
+    SmoothNoise, draw_sample_traj, draw_rectangle_boundary, bicycle_to_carla, carla_to_bicycle,
+    COLORS, MAP
+)
 
 
 def build_and_solve_mpc_hard(client, agents, cfg):
@@ -105,10 +90,6 @@ def build_and_solve_mpc_hard(client, agents, cfg):
         B_seq.append(B_k)
         c_seq.append(c_k)
 
-    # draw nominal trajectory in white
-    # nom_traj = X_nom[:, :2]  # (N+1, 2)
-    # draw_sample_traj(client.world, nom_traj, color=COLORS["white"], life_time=lt)
-
     t_build_start = time.perf_counter()
 
     # cvxpy variables
@@ -134,16 +115,32 @@ def build_and_solve_mpc_hard(client, agents, cfg):
         ]
 
     # add STL constraints
+    rectangles = ["vehicles", "lane"]
+    forbidden_rectangles = []
+
+    for item in rectangles:
+        cfg_item = cfg["stl"][item]
+        rect = [cfg_item['x_min'], cfg_item['x_max'], cfg_item['y_min'], cfg_item['y_max']]
+        forbidden_rectangles.append(rect)
+
+    for rect in forbidden_rectangles:
+        cons = avoid_rectangle_hard(x_var=x_var, rect=rect, N=N+1)
+        constraints += cons
+
+    # intersection constraint — ego must not enter intersection
+    y_line = cfg["stl"]["intersection_y"]
+
+    cons = stay_below_line_hard(x_var=x_var, y_line=y_line, N=N+1)
+    constraints += cons
 
     for i, agent in enumerate(agents[1:]):
 
         trajs = agent.sample_trajectories(N, dt, S)
-        draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
 
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
 
-        if agent.key in ["parked_v1", "parked_v2", "ambulance"]:
+        if agent.key in ["ambulance"]:
             cons = safe_distance_vehicle_hard(
                 x_var, traj_mean, ego.width, ego.length, agent.width, agent.length,
                 d_safe=d_safe, label=agent.key
@@ -159,8 +156,14 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     # control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
     control_cost = cp.sum_squares(u_var - U_nom.T)
 
+    traj_cost = cp.sum_squares(x_var - X_nom.T)
+
+    control_rate = 0
+    for k in range(N - 1):
+        control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
+
     # add small penalty for deviation from nominal control
-    objective = cp.Minimize(control_cost)
+    objective = cp.Minimize(traj_cost + 0.1 * control_rate)
     prob = cp.Problem(objective, constraints)
 
     # get number of constraints/variables
@@ -187,10 +190,18 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     t_solve = time.perf_counter() - t_solve_start
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-        print(f"Warning: solver returned status '{prob.status}', apply nominal control")
+
+        print(f"Warning: solver returned status '{prob.status}', apply fallback control_fallback to come to stop")
+
+        control_fallback = carla.VehicleControl()
+        control_fallback.throttle = 0.0
+        control_fallback.brake = 0.5
+        control_fallback.steer = 0.0
+        control_fallback.manual_gear_shift = False
+
         return {
             "status": False,
-            "control": control_nom,
+            "control": control_fallback,
             "deltas": None,
             "t_build": t_build, 
             "t_solve": t_solve,
@@ -201,9 +212,6 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
     draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
-
-    a, beta = u_var.value[:, 0]
-    control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
 
     return {
         "status": True,

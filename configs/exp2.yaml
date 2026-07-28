@@ -1,7 +1,8 @@
 # configs/config.yaml
 
 project:
-  name: "exp1"
+  name: "exp2"
+  agents: "amb_ped"
   version: "0.9.15"
   seed: 42
 
@@ -14,31 +15,39 @@ carla:
   dt: 0.1 
   sync_mode: true
   spectator:
-    location: {x: -60.227, y: 25.511, z: 14.917}
-    rotation: {pitch: -34.466, yaw: 39.638, roll: 0.000}
-
-
+    location: {x: -52.211, y: 19.228, z: 6.626}
+    rotation: {pitch: -21.737, yaw: 81.193, roll: 0.000}
 
 mpc:
   horizon: 2    # planning horizon: T
   num_samples: 100  
-  sim_start: 4.5     # in second
-  sim_end: 10
+  sim_start: 5     # in second
+  sim_end: 8
 
   w_safe: 10
   w_control: 1
   w_smooth: 5
 
-  type: "soft"
+  type: "hard"
   density: 2
 
 
 stl:
   pedestrian: 3.0   # in meter
   ambulance: 5.0
-  parked_v1: 1.5
-  parked_v2: 1.5
-  opposite_v1: 2
+  intersection_y: 41.5
+  # rectangles
+  vehicles:
+    x_min: -43
+    x_max: -39
+    y_min: 41
+    y_max: 59
+
+  lane:
+    x_min: -50.3
+    x_max: -47
+    y_min: 38
+    y_max: 110
 
 
 ego_vehicle:
@@ -59,12 +68,17 @@ ego_vehicle:
   lr: 1.50
   acc_min: -10
   acc_max: 6
-  beta_min: -0.133    # steer in [-15, 15] degrees
-  beta_max: 0.133
+  beta_min: -0.262 
+  beta_max: 0.262 
   width: 2.16   
   length: 4.79 
 
   warmup: 0.4
+
+# beta_max = 0.133 (≈7.6°)  → δ = 15.0°  → steer_max = 0.214
+# beta_max = 0.262 (≈15.0°) → δ = 28.6°  → steer_max = 0.408
+# beta_max = 0.500 (≈28.6°) → δ = 47.5°  → steer_max = 0.679
+# beta_max = 0.940 (≈53.9°) → δ = 70.0°  → steer_max = 1.000
 
 
 ambulance:
@@ -72,7 +86,7 @@ ambulance:
   autopilot: True
   draw_route: False
   behavior: "normal"
-  target_speed: 45
+  target_speed: 30
   spawn:
     location: {x: -45.146, y: 90.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
@@ -83,69 +97,83 @@ ambulance:
   lr: 1.88
   acc_min: -8
   acc_max: 4
-  beta_min: -0.5
-  beta_max: 0.5
+  beta_min: -0.133
+  beta_max: 0.133
   width: 2.35   
   length: 6.37 
 
-  proximity: 3
   std_acc: 0.1
   std_steer: 0.02
 
-  warmup: 1.0
+  warmup: 0.97
 
 
 pedestrian:
   spawn:
-    location: {x: -36.011, y: 36.775, z: 1.640}
+    location: {x: -22.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
 
-  mean_speed: 5
+  mean_speed: 4
   std_speed: 1
   std_dir: 0.05
-  
-
-parked_v1:
-  blueprint: "vehicle.mini.cooper_s"  
-  spawn:
-    location: {x: -41.153, y: 43.561, z: 2.117}
-    rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 1.97  
-  length: 3.81 
 
 
-parked_v2:
-  blueprint: "vehicle.audi.a2"
-  spawn:
-    location: {x: -53.153, y: 48.561, z: 2.117}
-    rotation: {pitch: -8.757, yaw: -89.587, roll: 0.000}
-  width: 1.79  
-  length: 3.71
-
-
-opposite_v1:
-  blueprint: "vehicle.audi.a2"
+# other road vehicles
+v1:
+  blueprint: "vehicle.audi.etron"
   autopilot: True
   draw_route: False
   behavior: "normal"
   target_speed: 30
   spawn:
-    location: {x: -58.164, y: 30.765, z: 2.604}
-    rotation: {pitch: -7.763, yaw: 39.390, roll: 0.000}
-
+    location: {x: -70.496, y: 27.805, z: 2.039}
+    rotation: {pitch: -10.521, yaw: 3.820, roll: 0.000}
   destination:
-    location: {x: -48.612, y: 78.872, z: 2.119}
-    rotation: {pitch: -16.386, yaw: 92.827, roll: 0.000}
+    location: {x: -52.335, y: 95.889, z: 1.734}
+    rotation: {pitch: -10.821, yaw: 91.525, roll: 0.000}
 
-  lr: 1.25
-  acc_min: -8
-  acc_max: 5
-  beta_min: -0.5    
-  beta_max: 0.5
-  width: 1.79  
-  length: 3.71
 
-  warmup: 0.8
+v2:
+  blueprint: "vehicle.nissan.patrol_2021"
+  autopilot: True
+  draw_route: False
+  behavior: "normal"
+  target_speed: 20
+  spawn:
+    location: {x: -48.752, y: 57.217, z: 1.398}
+    rotation: {pitch: -6.564, yaw: 87.010, roll: 0.000}
+  destination:
+    location: {x: -48.897, y: 107.022, z: 1.828}
+    rotation: {pitch: -0.680, yaw: 86.374, roll: 0.000}
+
+
+v3:
+  blueprint: "vehicle.toyota.prius"
+  autopilot: True
+  draw_route: False
+  behavior: "normal"
+  target_speed: 35
+  spawn:
+    location: {x: -41.611, y: 44.949, z: 1.421}
+    rotation: {pitch: -1.377, yaw: -90.495, roll: 0.000}
+  destination:
+    location: {x: -45.654, y: 3.146, z: 2.324}
+    rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
+
+
+v4:
+  blueprint: "vehicle.mercedes.coupe"
+  autopilot: True
+  draw_route: False
+  behavior: "normal"
+  target_speed: 35
+  spawn:
+    location: {x: -41.515, y: 56.130, z: 1.690}
+    rotation: {pitch: -1.377, yaw: -90.495, roll: 0.000}
+  destination:
+    location: {x: -45.654, y: 3.146, z: 2.324}
+    rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
+
 
 paths:
   log_dir: "./logs"
