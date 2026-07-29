@@ -1,4 +1,3 @@
-# kinematic_bicycle.py
 """
 State x = [px, py, theta, v]
 Control u = [a, beta]
@@ -12,10 +11,6 @@ Continuous dynamics:
 Discrete (forward Euler):
     x_next = x + dt * xdot(x, u)
 
-Features:
-- numpy-based step and rollout
-- linearize(x,u) returns discrete-time A, B (analytic Jacobians)
-- optional CasADi function generator (if casadi is installed)
 """
 
 from typing import Tuple, Optional
@@ -34,12 +29,9 @@ class KinematicBicycle:
         """
         Parameters
         ----------
-        lr : float
-            distance from center of mass to rear axle (m)
-        dt : float
-            discrete timestep (s)
-        v_min, v_max : optional floats
-            optional velocity clipping bounds used in step() to keep numeric stability
+        lr : distance from center of mass to rear axle (m)float      
+        dt : discrete timestep (s)      
+        v_min, v_max : optional velocity clipping bounds used in step() to keep numeric stability
         """
         self.lr = float(lr)
         self.dt = float(dt)
@@ -52,9 +44,6 @@ class KinematicBicycle:
     def _xdot(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         """
         Continuous-time derivative x_dot = f(x,u) under small-slip approx.
-        x shape: (4,)  -> [px, py, theta, v]
-        u shape: (2,)  -> [a, beta]
-        returns xdot shape (4,)
         """
         px, py, theta, v = x
         a, beta = u
@@ -75,15 +64,6 @@ class KinematicBicycle:
     def step(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         """
         One-step forward Euler integration: x_next = x + dt * xdot
-
-        Parameters
-        ----------
-        x : array-like (4,)
-        u : array-like (2,)
-
-        Returns
-        -------
-        x_next : ndarray (4,)
         """
         x = np.asarray(x, dtype=float).reshape(4,)
         u = np.asarray(u, dtype=float).reshape(2,)
@@ -104,18 +84,6 @@ class KinematicBicycle:
     def rollout(self, x0: np.ndarray, U: np.ndarray) -> np.ndarray:
         """
         Propagate a sequence of controls.
-
-        Parameters
-        ----------
-        x0 : array-like (4,)
-            initial state
-        U : array-like (T, 2)
-            control sequence
-
-        Returns
-        -------
-        X : ndarray (T+1, 4)
-            states along the trajectory (includes x0 as first row)
         """
         x = np.asarray(x0, dtype=float).reshape(4,)
         U = np.asarray(U, dtype=float)
@@ -133,20 +101,9 @@ class KinematicBicycle:
     def linearize(self, x: np.ndarray, u: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Linearize the discretized dynamics around (x, u) using analytic Jacobians.
-
         Returns discrete-time Jacobians A, B such that:
-            x_next ≈ A @ x + B @ u + c  (c can be computed if needed)
+            x_next ≈ A @ x + B @ u + c
         where A = I + dt * df/dx, B = dt * df/du for the forward Euler integrator.
-
-        Parameters
-        ----------
-        x : array-like (4,)
-        u : array-like (2,)
-
-        Returns
-        -------
-        A : ndarray (4,4)
-        B : ndarray (4,2)
         """
         x = np.asarray(x, dtype=float).reshape(4,)
         u = np.asarray(u, dtype=float).reshape(2,)

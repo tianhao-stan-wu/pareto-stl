@@ -1,11 +1,9 @@
 # configs/config.yaml
 
 project:
-  name: "exp2"
-  agents: "amb_ped"
+  name: "amb_ped_exp2"
   version: "0.9.15"
   seed: 42
-
 
 carla:
   host: "localhost"
@@ -19,9 +17,9 @@ carla:
     rotation: {pitch: -21.737, yaw: 81.193, roll: 0.000}
 
 mpc:
-  horizon: 2    # planning horizon: T
-  num_samples: 100  
-  sim_start: 6     # in second
+  horizon: 2             
+  num_samples: 100        
+  sim_start: 6     
   sim_end: 9
 
   w_safe: 0.63
@@ -31,9 +29,8 @@ mpc:
   type: "pareto"
   density: 3
 
-
 stl:
-  pedestrian: 6.0   # in meter
+  pedestrian: 6.0   
   ambulance: 10.0
   lane_max_relax: 3
   intersection_max_relax: 3
@@ -84,7 +81,6 @@ ego_vehicle:
 # beta_max = 0.500 (≈28.6°) → δ = 47.5°  → steer_max = 0.679
 # beta_max = 0.940 (≈53.9°) → δ = 70.0°  → steer_max = 1.000
 
-
 ambulance:
   blueprint: "vehicle.ford.ambulance"
   autopilot: True
@@ -112,7 +108,6 @@ ambulance:
   warmup: 0.9
   proximity_threshold: 5
 
-
 pedestrian:
   spawn:
     location: {x: -22.011, y: 36.775, z: 1.640}
@@ -121,7 +116,6 @@ pedestrian:
   mean_speed: 4
   std_speed: 1
   std_dir: 0.05
-
 
 # other road vehicles
 v1:
@@ -178,7 +172,6 @@ v4:
   destination:
     location: {x: -45.654, y: 3.146, z: 2.324}
     rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
-
 
 paths:
   log_dir: "./logs"

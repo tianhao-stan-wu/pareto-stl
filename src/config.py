@@ -1,9 +1,5 @@
 # import config anywhere in the project:
 
-# from src.config import load_config
-# cfg = load_config()
-# cfg["carla"]["host"]
-
 import yaml
 from pathlib import Path
 

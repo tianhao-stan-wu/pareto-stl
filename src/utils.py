@@ -17,15 +17,14 @@ from pathlib import Path
 def setup_logging(cfg):
     """Create log directory, save config copy, return paths."""
     name = cfg["project"]["name"]
-    agents = cfg["project"]["agents"]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     type = cfg["mpc"]["type"]
     density = cfg["mpc"]["density"]
 
     if type != "pareto":
-        log_dir = Path(f"./logs/{agents}/{type}/{timestamp}")
+        log_dir = Path(f"./logs/{name}/{type}/{timestamp}")
     else:
-        log_dir = Path(f"./logs/{agents}/{type}_d_{density}/{timestamp}")
+        log_dir = Path(f"./logs/{name}/{type}_d_{density}/{timestamp}")
 
     img_dir = log_dir / "imgs"
     img_dir.mkdir(parents=True, exist_ok=True)

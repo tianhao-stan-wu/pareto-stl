@@ -93,6 +93,7 @@ class Vehicle:
         if steer is not None:
             control.steer = max(-1.0, min(steer, 1.0))
 
+        control = self._clamp_control(control)
         self.actor.apply_control(control)
 
     def random_step(self):
@@ -116,11 +117,12 @@ class Vehicle:
             control.brake = min(abs(acc), 1.0)
 
         control.steer = max(-1.0, min(control.steer + self._steer_noise.sample(), 1.0))
-        self._clamp_control(control)
+        control = self._clamp_control(control)
         self.actor.apply_control(control)
 
     def apply_control(self, control: carla.VehicleControl):
         """Manually apply control."""
+        control = self._clamp_control(control)
         self.actor.apply_control(control)
 
     def _clamp_control(self, control: carla.VehicleControl):
@@ -128,6 +130,7 @@ class Vehicle:
         max_steer_rad = math.radians(70.0)
         max_steer = math.atan(2.0 * math.tan(self.beta_max)) / max_steer_rad
         control.steer = max(-max_steer, min(control.steer, max_steer))
+        return control
 
     # ------------------------------------------------------------------
     # Queries
@@ -354,3 +357,5 @@ class Walker:
     @property
     def agent_type(self) -> str:
         return "walker"
+
+        
