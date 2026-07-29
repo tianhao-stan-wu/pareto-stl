@@ -45,6 +45,8 @@ def main():
     ped = Walker(client.world, cfg, "pedestrian")
     agents = [ego, amb, ped]
 
+    amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
+
     # spawn other vehicles
     v1 = Vehicle(client.world, cfg, "v1")
     v2 = Vehicle(client.world, cfg, "v2")

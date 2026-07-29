@@ -45,13 +45,15 @@ def safe_distance_vehicle_pareto(
         px = x_var[0, k]
         py = x_var[1, k]
 
-        # lateral separation (x) uses width
-        constraints.append((ax - px) <= -margin_x + delta + big_M * (1 - b_left))
-        constraints.append((ax - px) >=  margin_x - delta - big_M * (1 - b_right))
+        # constraints.append((ax - px) <= -margin_x + delta + big_M * (1 - b_left))
+        # constraints.append((ax - px) >=  margin_x - delta - big_M * (1 - b_right))
+        # constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
+        # constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
 
-        # longitudinal separation (y) uses length
-        constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
-        constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
+        constraints.append((ax - px) <= -d_safe + delta + big_M * (1 - b_left))
+        constraints.append((ax - px) >=  d_safe - delta - big_M * (1 - b_right))
+        constraints.append((ay - py) <= -d_safe + delta + big_M * (1 - b_below))
+        constraints.append((ay - py) >=  d_safe - delta - big_M * (1 - b_above))
 
     # constraints.append(delta <= margin_y)
 
@@ -104,10 +106,15 @@ def safe_distance_walker_pareto(
         px = x_var[0, k]
         py = x_var[1, k]
 
-        constraints.append((ax - px) <= -(half_w + d_safe) + delta + big_M * (1 - b_left))
-        constraints.append((ax - px) >=  (half_w + d_safe) - delta - big_M * (1 - b_right))
-        constraints.append((ay - py) <= -(half_l + d_safe) + delta + big_M * (1 - b_below))
-        constraints.append((ay - py) >=  (half_l + d_safe) - delta - big_M * (1 - b_above))
+        # constraints.append((ax - px) <= -(half_w + d_safe) + delta + big_M * (1 - b_left))
+        # constraints.append((ax - px) >=  (half_w + d_safe) - delta - big_M * (1 - b_right))
+        # constraints.append((ay - py) <= -(half_l + d_safe) + delta + big_M * (1 - b_below))
+        # constraints.append((ay - py) >=  (half_l + d_safe) - delta - big_M * (1 - b_above))
+
+        constraints.append((ax - px) <= -d_safe + delta + big_M * (1 - b_left))
+        constraints.append((ax - px) >=  d_safe - delta - big_M * (1 - b_right))
+        constraints.append((ay - py) <= -d_safe + delta + big_M * (1 - b_below))
+        constraints.append((ay - py) >=  d_safe - delta - big_M * (1 - b_above))
 
     # constraints.append(delta <= d_safe)
 

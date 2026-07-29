@@ -10,37 +10,18 @@ import random
 import time
 
 from src.bicycle_model import KinematicBicycle
-from src.stl_constraints import safe_distance_vehicle_pareto, safe_distance_walker_pareto
-from src.utils import SmoothNoise, draw_sample_traj, bicycle_to_carla, carla_to_bicycle
-
-
-COLORS = {
-    "red":     carla.Color(150, 0, 0),
-    "blue":    carla.Color(0, 0, 150),
-    "green":   carla.Color(0, 80, 0),
-    "yellow":  carla.Color(80, 80, 0),
-    "magenta": carla.Color(80, 0, 80),
-    "cyan":    carla.Color(0, 80, 80),
-    "orange":  carla.Color(80, 40, 0),
-    "white":   carla.Color(80, 80, 80),
-}
-
-MAP = {
-    "ego": "blue",
-    "ambulance": "magenta",
-    "pedestrian": "red",
-    "parked_v1": "yellow",
-    "parked_v2": "cyan",
-    "opposite_v1": "green"
-}
+from src.stl_constraints_soft import (
+    safe_distance_vehicle_soft, safe_distance_walker_soft, avoid_rectangle_soft,
+    xline_soft, xline_hard_l, yline_soft, avoid_rectangle_hard 
+)
+from src.stl_constraints_pareto import safe_distance_vehicle_pareto, safe_distance_walker_pareto
+from src.utils import (
+    SmoothNoise, draw_sample_traj, draw_rectangle_boundary, bicycle_to_carla, carla_to_bicycle,
+    COLORS, MAP
+)
 
 
 def build_and_solve_mpc_pareto(client, agents, cfg):
-    """
-    Epsilon-constraint MPC: grid over epsilon bounds for each delta,
-    minimize one delta while constraining others <= epsilon.
-    Returns Pareto front of solutions.
-    """
 
     # extract parameters
     T = cfg["mpc"]["horizon"]
@@ -114,7 +95,6 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
     for agent in agents[1:]:
         trajs = agent.sample_trajectories(N, dt, S)
-        draw_sample_traj(client.world, trajs, color=COLORS[MAP[agent.key]], life_time=lt)
         agent_trajs[agent.key] = trajs.mean(axis=0)
 
     # build epsilon grids for each agent
@@ -176,6 +156,22 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
             # safe distance constraints + deltas
             deltas = {}
+
+            cons, delta = xline_soft(x_var=x_var, x_line=-47, N=N+1, max_relax=4)
+            constraints += cons
+            deltas["lane"] = delta
+
+            cons, delta = xline_hard_l(x_var=x_var, x_line=-42, N=N+1)
+            constraints += cons
+
+            # intersection constraint — ego must not enter intersection
+            y_line = cfg["stl"]["intersection_y"]
+            inter_max_relax = cfg["stl"]["intersection_max_relax"]
+
+            cons, delta = yline_soft(x_var=x_var, y_line=y_line, N=N+1, max_relax=inter_max_relax)
+            constraints += cons
+            deltas["intersection"] = delta
+
             for agent in agents[1:]:
                 traj_mean = agent_trajs[agent.key]
                 d_safe = d_safes[agent.key]
@@ -209,6 +205,7 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
             # control deviation from nominal
             control_cost = cp.norm(u_var - U_nom.T, 1)
+            traj_cost = cp.norm(x_var - X_nom.T, 1)
 
             # control rate — penalize change between consecutive controls
             control_rate = 0
@@ -216,14 +213,15 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
                 control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
 
             # trajectory smoothness — penalize curvature (second derivative)
-            traj_smooth = 0
-            for k in range(1, N):
-                traj_smooth += cp.norm(x_var[:2, k+1] - 2 * x_var[:2, k] + x_var[:2, k-1], 1)
+            # traj_smooth = 0
+            # for k in range(1, N):
+            #     traj_smooth += cp.norm(x_var[:2, k+1] - 2 * x_var[:2, k] + x_var[:2, k-1], 1)
 
+            # + w_control * control_cost
             objective = cp.Minimize(
-                w_safe * deltas[obj_key]
-                + w_control * control_cost
-                + w_smooth * (control_rate + traj_smooth)
+                w_safe * sum(deltas.values())
+                + w_smooth * control_rate
+                + 0.2 * traj_cost
             )
 
             prob = cp.Problem(objective, constraints)
@@ -272,9 +270,16 @@ def build_and_solve_mpc_pareto(client, agents, cfg):
 
     # select best point: min pedestrian delta, then min ambulance delta
     if not pareto_front:
+
+        control_fallback = carla.VehicleControl()
+        control_fallback.throttle = 0.0
+        control_fallback.brake = 0.5
+        control_fallback.steer = 0.0
+        control_fallback.manual_gear_shift = False
+
         return {
             "status": False,
-            "control": control_nom,
+            "control": control_fallback,
             "deltas": None,
             "t_build": t_build_acc,
             "t_solve": t_solve_acc,

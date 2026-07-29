@@ -136,7 +136,6 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     for i, agent in enumerate(agents[1:]):
 
         trajs = agent.sample_trajectories(N, dt, S)
-
         traj_mean = trajs.mean(axis=0)
         d_safe = cfg["stl"][agent.key]
 
@@ -153,10 +152,7 @@ def build_and_solve_mpc_hard(client, agents, cfg):
 
         constraints += cons
 
-    # control_cost = cp.sum_squares(u_var[:, 0] - U_nom[0])
-    control_cost = cp.sum_squares(u_var - U_nom.T)
-
-    traj_cost = cp.sum_squares(x_var - X_nom.T)
+    traj_cost = cp.norm(x_var - X_nom.T)
 
     control_rate = 0
     for k in range(N - 1):
@@ -212,6 +208,9 @@ def build_and_solve_mpc_hard(client, agents, cfg):
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
     draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
+
+    a, beta = u_var.value[:, 0]
+    control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
 
     return {
         "status": True,

@@ -30,7 +30,6 @@ def safe_distance_vehicle_soft(
 
     delta = cp.Variable(nonneg=True, name=f"delta_{label}")
     constraints = []
-    # binaries = []
 
     for k in range(N):
         ax = float(agent_traj[k, 0])
@@ -40,8 +39,6 @@ def safe_distance_vehicle_soft(
         b_right = cp.Variable(boolean=True, name=f"b_{label}_right_k{k}")
         b_below = cp.Variable(boolean=True, name=f"b_{label}_below_k{k}")
         b_above = cp.Variable(boolean=True, name=f"b_{label}_above_k{k}")
-
-        # binaries.append({"left": b_left, "right": b_right, "below": b_below, "above": b_above})
 
         constraints.append(b_left + b_right + b_below + b_above >= 1)
 
@@ -56,11 +53,9 @@ def safe_distance_vehicle_soft(
         constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - b_above))
 
-    # if d_safe <= delta <= margin_y, treat as d_safe = delta for post processing (physically impossible)
     constraints.append(delta <= margin_y)
 
     return constraints, delta
-    # return constraints, delta, binaries
 
 
 def safe_distance_walker_soft(
@@ -114,6 +109,157 @@ def safe_distance_walker_soft(
         constraints.append((ay - py) <= -(half_l + d_safe) + delta + big_M * (1 - b_below))
         constraints.append((ay - py) >=  (half_l + d_safe) - delta - big_M * (1 - b_above))
 
-    constraints.append(delta <= d_safe)
+    constraints.append(delta <= d_safe + half_l)
 
     return constraints, delta
+
+
+def avoid_rectangle_soft(
+    x_var: cp.Variable,
+    rect: Sequence[float],   # [x_min, x_max, y_min, y_max]
+    N: int,
+    max_relax: int,
+    name_prefix: str = "avoid_rect",
+    M: float = 500.0,
+    eps: float = 1e-3,
+) -> Tuple[List[cp.Constraint], cp.Variable]:
+    """
+    Enforce that p_k = x_var[0:2, k] stays OUTSIDE an axis-aligned rectangle.
+
+    Parameters
+    ----------
+    rect : [x_min, x_max, y_min, y_max]
+    """
+
+    if len(rect) != 4:
+        raise ValueError("rect must be [x_min, x_max, y_min, y_max]")
+
+    x_min, x_max, y_min, y_max = rect
+    cons: List[cp.Constraint] = []
+
+    delta = cp.Variable(nonneg=True, name=f"delta_{name_prefix}")
+
+    for k in range(N):
+
+        p_k = x_var[0:2, k]
+        x, y = p_k[0], p_k[1]
+
+       
+        # Binary variables indicating which outside condition is active
+        z = cp.Variable(4, boolean=True, name=f"{name_prefix}_{k}")
+
+        # Must satisfy at least one outside condition
+        cons.append(cp.sum(z) >= 1)
+
+        # Left of rectangle
+        cons.append(x <= x_min - eps + M * (1 - z[0]))
+
+        # Right of rectangle
+        cons.append(x >= x_max - delta + eps - M * (1 - z[1]))
+
+        # Below rectangle
+        cons.append(y <= y_min - eps + M * (1 - z[2]))
+
+        # Above rectangle
+        cons.append(y >= y_max + eps - M * (1 - z[3]))
+
+    # cons.append(delta <= max_relax)
+
+    return cons, delta
+
+
+def yline_soft(x_var, y_line, N, max_relax, label="intersection"):
+    """
+    G[] ego_py <= y_line
+    Hard version — no relaxation.
+    """
+    constraints = []
+
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
+
+    for k in range(N):
+        py = x_var[1, k]
+        constraints.append(py >= y_line - delta)
+
+    # constraints.append(delta <= max_relax)
+
+    return constraints, delta
+
+
+def xline_soft(x_var, x_line, N, max_relax, label="lane"):
+    """
+    G[] ego_py <= y_line
+    Hard version — no relaxation.
+    """
+    constraints = []
+
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
+
+    for k in range(N):
+        px = x_var[0, k]
+        constraints.append(px >= x_line - delta)
+
+    # constraints.append(delta <= max_relax)
+
+    return constraints, delta
+
+
+def xline_hard_l(x_var, x_line, N, label="vehicle"):
+    """
+    G[] ego_py <= y_line
+    Hard version — no relaxation.
+    """
+    constraints = []
+
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
+
+    for k in range(N):
+        px = x_var[0, k]
+        constraints.append(px <= x_line)
+
+    return constraints, delta
+
+
+def avoid_rectangle_hard(
+    x_var: cp.Variable,
+    rect: Sequence[float],   # [x_min, x_max, y_min, y_max]
+    N: int,
+    label: str = "avoid_rect",
+    M: float = 500.0,
+    eps: float = 1e-3,
+) -> Tuple[List[cp.Constraint], cp.Variable]:
+    """
+    Enforce that p_k = x_var[0:2, k] stays OUTSIDE an axis-aligned rectangle.
+
+    Parameters
+    ----------
+    rect : [x_min, x_max, y_min, y_max]
+    """
+
+    if len(rect) != 4:
+        raise ValueError("rect must be [x_min, x_max, y_min, y_max]")
+
+    x_min, x_max, y_min, y_max = rect
+    cons: List[cp.Constraint] = []
+
+    for k in range(N):
+
+        p_k = x_var[0:2, k]
+        x, y = p_k[0], p_k[1]
+
+       
+        # Binary variables indicating which outside condition is active
+        b_left  = cp.Variable(boolean=True, name=f"b_{label}_left_k{k}")
+        b_right = cp.Variable(boolean=True, name=f"b_{label}_right_k{k}")
+        b_below = cp.Variable(boolean=True, name=f"b_{label}_below_k{k}")
+        b_above = cp.Variable(boolean=True, name=f"b_{label}_above_k{k}")
+
+        # cons.append(b_left + b_right + b_below + b_above >= 1)
+        cons.append(b_left + b_below + b_above >= 1)
+
+        cons.append(x <= x_min - eps + M * (1 - b_left))
+        # cons.append(x >= x_max + eps - M * (1 - b_right))
+        cons.append(y <= y_min - eps + M * (1 - b_below))
+        cons.append(y >= y_max + eps - M * (1 - b_above))
+
+    return cons

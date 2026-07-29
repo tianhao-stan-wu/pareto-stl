@@ -21,21 +21,25 @@ carla:
 mpc:
   horizon: 2    # planning horizon: T
   num_samples: 100  
-  sim_start: 5     # in second
-  sim_end: 8
+  sim_start: 6     # in second
+  sim_end: 9
 
-  w_safe: 10
-  w_control: 1
-  w_smooth: 5
+  w_safe: 0.63
+  w_control: 0.06
+  w_smooth: 0.31
 
-  type: "hard"
-  density: 2
+  type: "pareto"
+  density: 3
 
 
 stl:
-  pedestrian: 3.0   # in meter
-  ambulance: 5.0
-  intersection_y: 41.5
+  pedestrian: 6.0   # in meter
+  ambulance: 10.0
+  lane_max_relax: 3
+  intersection_max_relax: 3
+
+  intersection_y: 39
+
   # rectangles
   vehicles:
     x_min: -43
@@ -44,8 +48,8 @@ stl:
     y_max: 59
 
   lane:
-    x_min: -50.3
-    x_max: -47
+    x_min: -53 #-42 #
+    x_max: -47 #-38 #
     y_min: 38
     y_max: 110
 
@@ -105,7 +109,8 @@ ambulance:
   std_acc: 0.1
   std_steer: 0.02
 
-  warmup: 0.97
+  warmup: 0.9
+  proximity_threshold: 5
 
 
 pedestrian:
