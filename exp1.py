@@ -20,6 +20,7 @@ from src.mpc_soft import build_and_solve_mpc_soft
 from src.mpc_hard import build_and_solve_mpc_hard
 from src.mpc_pareto import build_and_solve_mpc_pareto
 
+# comment
 
 def main():
 
