@@ -271,6 +271,9 @@ def solve_mpc_soft(computed, agents, cfg, client):
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
 
+    delta_values = {key: float(d.value) for key, d in deltas.items()}
+    print(", ".join(f"{key}: {val:.3f}" for key, val in delta_values.items()))
+
     return {
         "status": True,
         "control": control,
