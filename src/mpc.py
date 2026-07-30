@@ -15,7 +15,7 @@ from src.utils import (
     draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
 )
 
-def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao):
+def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N):
 
     x_var = cp.Variable((4, N + 1), name="x")
     u_var = cp.Variable((2, N), name="u")
@@ -61,13 +61,13 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao):
         constraints.append(delta_x <= 0)
         constraints.append(delta_y <= 0)
 
-    x_min, x_max, y_min, y_max = [0, 0, 0, 0]
+    x_min, x_max, y_min, y_max = [-46.3, -43.4, 40.9, 74.8]
     cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
     constraints += cons
     constraints.append(delta_lane <= 0)
 
-    y_exit = 
-    cons, delta_inter = clear_intersection(x_var, y_exit, N=N-tao)
+    y_exit = 0
+    cons, delta_inter = clear_intersection(x_var, y_exit, N)
     constraints += cons
     constraints.append(delta_inter <= 0)
 
@@ -141,8 +141,19 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao):
     }
 
 
-def solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao):
+def solve_mpc_soft(computed, agents, cfg):
+
+    T = cfg["mpc"]["horizon"]
+    S = cfg["mpc"]["num_samples"]
+    dt = cfg["carla"]["dt"]
+    N = int(round(T / dt))
+    lt = dt * 1.5
+
+    A_seq, B_seq, c_seq, ego_init, X_nom, U_nom = computed
+    ego = agents[0]
     
+    t_build_start = time.perf_counter()
+
     x_var = cp.Variable((4, N + 1), name="x")
     u_var = cp.Variable((2, N), name="u")
 
@@ -163,6 +174,8 @@ def solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao):
             u_var[1, k] <= ego.beta_max,
         ]
 
+    deltas = {}
+
     # STL constraints
     for i, agent in enumerate(agents[1:]):
 
@@ -182,13 +195,19 @@ def solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao):
             )
 
         constraints += cons
+        deltas[agent.key + "_x"] = delta_x
+        deltas[agent.key + "_y"] = delta_y
 
+    x_min, x_max, y_min, y_max = [-46.3, -43.4, 40.9, 74.8]
     cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
     constraints += cons
     constraints.append(delta_lane <= 4)
+    deltas["lane"] = delta_lane
 
-    cons, delta_inter = clear_intersection(x_var, y_exit, N=N-tao)
+    y_exit = 0
+    cons, delta_inter = clear_intersection(x_var, y_exit, N)
     constraints += cons
+    deltas["intersection"] = delta_inter
 
     # control deviation from nominal
     traj_cost = cp.norm(x_var - X_nom.T, 1)
@@ -266,7 +285,7 @@ def solve_mpc_pareto():
     pass
 
 
-def build_and_solve_mpc(client, agents, cfg, tao):
+def build_and_solve_mpc(client, agents, cfg):
 
     # extract parameters
     T = cfg["mpc"]["horizon"]
@@ -344,13 +363,15 @@ def build_and_solve_mpc(client, agents, cfg, tao):
 
     # draw_sample_traj(client.world, X_nom[:, :2], color=COLORS["white"], life_time=lt)
 
+    computed = [A_seq, B_seq, c_seq, ego_init, X_nom, U_nom]
+
     mpc_type = cfg['mpc']['type']
 
     if mpc_type == "hard":
-        results = solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao)
+        results = solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, cfg)
 
     elif mpc_type == "soft":
-        results = solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao)
+        results = solve_mpc_soft(computed, agents, cfg)
 
     elif mpc_type == "pareto":
         results = solve_mpc_pareto()

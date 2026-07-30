@@ -23,7 +23,7 @@ from src.mpc import build_and_solve_mpc
 def main():
 
     # init
-    cfg = load_config(exp="exp2")
+    cfg = load_config(exp="amb_ped_exp2")
     log_dir, img_dir = setup_logging(cfg)
     
     seed = cfg["project"]["seed"]
@@ -114,7 +114,7 @@ def main():
                 v3.step(acc=-1, steer=0.5)
                 v4.step(acc=-1, steer=0.5)
        
-                result = build_and_solve_mpc(client, agents, cfg, tick - start_tick)
+                result = build_and_solve_mpc(client, agents, cfg)
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])

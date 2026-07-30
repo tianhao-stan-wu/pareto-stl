@@ -83,7 +83,7 @@ def safe_distance_walker(
         ay = float(agent_traj[k, 1])
 
         z = cp.Variable(4, boolean=True, name=f"z_{label}_k{k}")
-    constraints.append(cp.sum(z) >= 1)
+        constraints.append(cp.sum(z) >= 1)
 
         px = x_var[0, k]
         py = x_var[1, k]

@@ -22,13 +22,13 @@ mpc:
   sim_start: 6     
   sim_end: 9
 
-  type: "pareto"
+  type: "soft"
 
   density: 3
 
 stl:
-  pedestrian: 6.0   
-  ambulance: 10.0
+  pedestrian: 2   
+  ambulance: 4
 
 ego_vehicle:
   # spawn params
