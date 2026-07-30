@@ -7,17 +7,15 @@ import time
 
 from src.bicycle_model import KinematicBicycle
 
-# from src.stl_constraints_hard import (
-#     safe_distance_vehicle_hard, safe_distance_walker_hard, avoid_rectangle_hard,
-#     stay_below_line_hard
-# )
-
-from src.utils import (
-    SmoothNoise, draw_sample_traj, draw_rectangle_boundary, bicycle_to_carla, carla_to_bicycle,
-    COLORS, MAP
+from src.stl_constraints import (
+    safe_distance_vehicle, safe_distance_walker, stay_in_lane, clear_intersection
 )
 
-def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
+from src.utils import (
+    draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
+)
+
+def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao):
 
     x_var = cp.Variable((4, N + 1), name="x")
     u_var = cp.Variable((2, N), name="u")
@@ -25,14 +23,13 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
     constraints = []
     constraints.append(x_var[:, 0] == ego_init)
 
-    # dynamics constraints
+    # dynamics and control constraints
     for k in range(N):
+
         constraints.append(
             x_var[:, k + 1] == A_seq[k] @ x_var[:, k] + B_seq[k] @ u_var[:, k] + c_seq[k]
         )
 
-    # control bounds
-    for k in range(N):
         constraints += [
             u_var[0, k] >= ego.acc_min,
             u_var[0, k] <= ego.acc_max,
@@ -64,14 +61,19 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
         constraints.append(delta_x <= 0)
         constraints.append(delta_y <= 0)
 
-    cons, delta = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
+    x_min, x_max, y_min, y_max = [0, 0, 0, 0]
+    cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
     constraints += cons
+    constraints.append(delta_lane <= 0)
 
-    
+    y_exit = 
+    cons, delta_inter = clear_intersection(x_var, y_exit, N=N-tao)
+    constraints += cons
+    constraints.append(delta_inter <= 0)
 
     traj_cost = cp.norm(x_var - X_nom.T)
-
     control_rate = 0
+
     for k in range(N - 1):
         control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
 
@@ -79,7 +81,6 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
     objective = cp.Minimize(traj_cost + 0.1 * control_rate)
     prob = cp.Problem(objective, constraints)
 
-    # get number of constraints/variables
     num_constraints = sum(c.size for c in constraints)
     num_variables = sum(v.size for v in prob.variables())
     print(f"  Problem size: {num_constraints} constraints, {num_variables} variables")
@@ -124,7 +125,7 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
 
     # draw ego planned trajectory
     ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
-    draw_sample_traj(client.world, ego_traj, color=COLORS[MAP["ego"]], life_time=lt)
+    draw_sample_traj(client.world, ego_traj, color=COLORS["blue"], life_time=lt)
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
@@ -140,15 +141,132 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents):
     }
 
 
-def solve_mpc_soft():
-    pass
+def solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao):
+    
+    x_var = cp.Variable((4, N + 1), name="x")
+    u_var = cp.Variable((2, N), name="u")
 
+    constraints = []
+    constraints.append(x_var[:, 0] == ego_init)
+
+    # dynamics and control constraints
+    for k in range(N):
+
+        constraints.append(
+            x_var[:, k + 1] == A_seq[k] @ x_var[:, k] + B_seq[k] @ u_var[:, k] + c_seq[k]
+        )
+
+        constraints += [
+            u_var[0, k] >= ego.acc_min,
+            u_var[0, k] <= ego.acc_max,
+            u_var[1, k] >= ego.beta_min,
+            u_var[1, k] <= ego.beta_max,
+        ]
+
+    # STL constraints
+    for i, agent in enumerate(agents[1:]):
+
+        trajs = agent.sample_trajectories(N, dt, S)
+        traj_mean = trajs.mean(axis=0)
+        d_safe = cfg["stl"][agent.key]
+
+        if agent.key in ["ambulance"]:
+            cons, delta_x, delta_y = safe_distance_vehicle(
+                x_var, traj_mean, ego.width, ego.length, agent.width, agent.length,
+                d_safe=d_safe, label=agent.key
+            )
+        else:
+            cons, delta_x, delta_y = safe_distance_walker(
+                x_var, traj_mean, ego.width, ego.length,
+                d_safe=d_safe, label=agent.key
+            )
+
+        constraints += cons
+
+    cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
+    constraints += cons
+    constraints.append(delta_lane <= 4)
+
+    cons, delta_inter = clear_intersection(x_var, y_exit, N=N-tao)
+    constraints += cons
+
+    # control deviation from nominal
+    traj_cost = cp.norm(x_var - X_nom.T, 1)
+
+    # control rate — penalize change between consecutive controls
+    control_rate = 0
+    for k in range(N - 1):
+        control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
+
+    eps = 1e-2  
+    objective = cp.Minimize(sum(deltas.values()) + eps * (control_rate + traj_cost))
+
+    prob = cp.Problem(objective, constraints)
+
+    num_constraints = sum(c.size for c in constraints)
+    num_variables = sum(v.size for v in prob.variables())
+    print(f"  Problem size: {num_constraints} constraints, {num_variables} variables")
+
+    t_build = time.perf_counter() - t_build_start
+
+    # select MIP solver
+    solver = None
+    for s in [cp.GUROBI, cp.CPLEX, cp.GLPK_MI, cp.SCIP, cp.ECOS_BB]:
+        if s in cp.installed_solvers():
+            solver = s
+            break
+    if solver is None:
+        raise RuntimeError(
+            f"No MIP solver found. Install GUROBI, CPLEX, GLPK, or SCIP. "
+            f"Installed: {cp.installed_solvers()}"
+        )
+
+    t_solve_start = time.perf_counter()
+    prob.solve(solver=solver, verbose=False)
+    t_solve = time.perf_counter() - t_solve_start
+
+    if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+
+        print(f"Warning: solver returned status '{prob.status}', apply fallback control_fallback to come to stop")
+
+        control_fallback = carla.VehicleControl()
+        control_fallback.throttle = 0.0
+        control_fallback.brake = 0.5
+        control_fallback.steer = 0.0
+        control_fallback.manual_gear_shift = False
+
+        return {
+            "status": False,
+            "control": control_fallback,
+            "deltas": None,
+            "t_build": t_build, 
+            "t_solve": t_solve,
+            "num_constraints": num_constraints,
+            "num_variables": num_variables,
+        }
+
+    # draw ego planned trajectory
+    ego_traj = x_var.value[:2, :].T  # (N+1, 2) — extract px, py
+    draw_sample_traj(client.world, ego_traj, color=COLORS["blue"], life_time=lt)
+
+    a, beta = u_var.value[:, 0]
+    control = bicycle_to_carla([a, beta], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
+
+    return {
+        "status": True,
+        "control": control,
+        "deltas": None,
+        "t_build": t_build, 
+        "t_solve": t_solve,
+        "num_constraints": num_constraints,
+        "num_variables": num_variables,
+    }
 
 def solve_mpc_pareto():
     pass
 
 
-def build_and_solve_mpc(client, agents, cfg):
+def build_and_solve_mpc(client, agents, cfg, tao):
 
     # extract parameters
     T = cfg["mpc"]["horizon"]
@@ -229,10 +347,10 @@ def build_and_solve_mpc(client, agents, cfg):
     mpc_type = cfg['mpc']['type']
 
     if mpc_type == "hard":
-        results = solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents)
+        results = solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N, tao)
 
     elif mpc_type == "soft":
-        results = solve_mpc_soft()
+        results = solve_mpc_soft(A_seq, B_seq, c_seq, ego, agents, N, tao)
 
     elif mpc_type == "pareto":
         results = solve_mpc_pareto()

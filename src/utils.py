@@ -290,14 +290,6 @@ COLORS = {
     "white":   carla.Color(80, 80, 80),
 }
 
-MAP = {
-    "ego": "blue",
-    "ambulance": "magenta",
-    "pedestrian": "red",
-    "parked_v1": "yellow",
-    "parked_v2": "cyan"
-}
-
 
 class SmoothNoise:
     """Ornstein-Uhlenbeck process for smooth random noise."""

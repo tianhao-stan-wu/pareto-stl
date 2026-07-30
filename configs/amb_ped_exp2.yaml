@@ -22,34 +22,13 @@ mpc:
   sim_start: 6     
   sim_end: 9
 
-  w_safe: 0.63
-  w_control: 0.06
-  w_smooth: 0.31
-
   type: "pareto"
+
   density: 3
 
 stl:
   pedestrian: 6.0   
   ambulance: 10.0
-  lane_max_relax: 3
-  intersection_max_relax: 3
-
-  intersection_y: 39
-
-  # rectangles
-  vehicles:
-    x_min: -43
-    x_max: -39
-    y_min: 41
-    y_max: 59
-
-  lane:
-    x_min: -53 #-42 #
-    x_max: -47 #-38 #
-    y_min: 38
-    y_max: 110
-
 
 ego_vehicle:
   # spawn params

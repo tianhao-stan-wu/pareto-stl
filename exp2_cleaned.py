@@ -14,7 +14,7 @@ from src.config import load_config
 from src.carla_client import Client
 from src.agents import Vehicle, Walker
 from src.utils import (
-    SmoothNoise, set_all_lights_green, print_distances, setup_logging, setup_camera, save_frame, 
+    set_all_lights_green, setup_logging, setup_camera, save_frame, 
     save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
 )
 from src.mpc import build_and_solve_mpc
@@ -114,7 +114,7 @@ def main():
                 v3.step(acc=-1, steer=0.5)
                 v4.step(acc=-1, steer=0.5)
        
-                result = build_and_solve_mpc(client, agents, cfg)
+                result = build_and_solve_mpc(client, agents, cfg, tick - start_tick)
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])
