@@ -141,7 +141,7 @@ def solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, N):
     }
 
 
-def solve_mpc_soft(computed, agents, cfg):
+def solve_mpc_soft(computed, agents, cfg, client):
 
     T = cfg["mpc"]["horizon"]
     S = cfg["mpc"]["num_samples"]
@@ -371,7 +371,7 @@ def build_and_solve_mpc(client, agents, cfg):
         results = solve_mpc_hard(A_seq, B_seq, c_seq, ego, agents, cfg)
 
     elif mpc_type == "soft":
-        results = solve_mpc_soft(computed, agents, cfg)
+        results = solve_mpc_soft(computed, agents, cfg, client)
 
     elif mpc_type == "pareto":
         results = solve_mpc_pareto()
