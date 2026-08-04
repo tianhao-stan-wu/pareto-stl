@@ -26,13 +26,7 @@ class Vehicle:
             )
             if "destination" in self.cfg:
                 self._set_destination()
-            velocity = carla.Vector3D(
-                x=0,
-                y=-13,
-                z=0.0
-            )
-            self.actor.set_target_velocity(velocity)
-            # self.agent.set_target_speed(self.cfg.get("target_speed", 30))
+            self.agent.set_target_speed(self.cfg.get("target_speed", 30))
             if self.cfg.get("draw_route", False):
                 self.draw_route()
 

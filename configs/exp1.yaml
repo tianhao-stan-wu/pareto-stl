@@ -19,10 +19,10 @@ carla:
 mpc:
   horizon: 2             
   num_samples: 100        
-  sim_start: 6     
-  sim_end: 9
+  sim_start: 5     
+  sim_end: 8
   type: "soft"
-  density: 3
+  density: 2
 
 stl:
   pedestrian: 2   
@@ -35,7 +35,7 @@ ego_vehicle:
   behavior: "normal"
   target_speed: 40
   spawn:
-    location: {x: -45.214, y: 70.322, z: 0.5}
+    location: {x: -45.214, y: 80.322, z: 0.5}
     rotation: {pitch: -2.933, yaw: -87.606, roll: 0.000}
   destination:
     location: {x: -45.214, y: -3.398, z: 1}
@@ -47,7 +47,7 @@ ego_vehicle:
   beta_max: 0.262 
   width: 2.16   
   length: 4.79 
-  warmup: 0.4
+  warmup: 0.5
 
 ambulance:
   blueprint: "vehicle.ford.ambulance"
@@ -56,7 +56,7 @@ ambulance:
   behavior: "normal"
   target_speed: 30
   spawn:
-    location: {x: -45.146, y: 90.043, z: 2.194}
+    location: {x: -45.146, y: 100.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
   destination:
     location: {x: -45.654, y: 3.146, z: 2.324}
@@ -70,7 +70,7 @@ ambulance:
   length: 6.37 
   std_acc: 0.1
   std_steer: 0.02
-  warmup: 0.9
+  warmup: 0.93
   proximity_threshold: 5
 
 pedestrian:
