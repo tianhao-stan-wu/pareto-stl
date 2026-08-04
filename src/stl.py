@@ -42,8 +42,8 @@ def safe_distance_vehicle(
         constraints.append((ay - py) >=  margin_y - delta_y - big_M * (1 - z[3]))
 
     # option A: guaranteed feasible, allows full overlap
-    constraints.append(delta_x <= margin_x)
-    constraints.append(delta_y <= margin_y)
+    # constraints.append(delta_x <= margin_x)
+    # constraints.append(delta_y <= margin_y)
 
     # option B: tighter bound, may be infeasible (triggers fallback)
     # constraints.append(delta_x <= d_safe)
@@ -94,8 +94,8 @@ def safe_distance_walker(
         constraints.append((ay - py) >=  margin_y - delta_y - big_M * (1 - z[3]))  # above
 
     # option A: guaranteed feasible, allows full overlap
-    constraints.append(delta_x <= margin_x)
-    constraints.append(delta_y <= margin_y)
+    # constraints.append(delta_x <= margin_x)
+    # constraints.append(delta_y <= margin_y)
 
     # option B: tighter bound, may be infeasible (triggers fallback)
     # constraints.append(delta_x <= d_safe)

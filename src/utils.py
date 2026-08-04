@@ -30,7 +30,8 @@ def setup_logging(cfg):
     img_dir.mkdir(parents=True, exist_ok=True)
 
     # save config copy
-    shutil.copy(f"configs/{name}.yaml", f"{log_dir}/{name}.yaml")
+    exp = cfg["project"]["exp"]
+    shutil.copy(f"configs/{exp}.yaml", f"{log_dir}/{exp}.yaml")
 
     print(f"Logging to {log_dir}")
     return log_dir, img_dir

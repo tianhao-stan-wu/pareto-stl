@@ -5,9 +5,9 @@ import math
 import random
 import time
 
-from src.bicycle_model import KinematicBicycle
+from src.bicycle import KinematicBicycle
 
-from src.stl_constraints import (
+from src.stl import (
     safe_distance_vehicle, safe_distance_walker, stay_in_lane, clear_intersection
 )
 
@@ -198,11 +198,11 @@ def solve_mpc_soft(computed, agents, cfg, client):
         deltas[agent.key + "_x"] = delta_x
         deltas[agent.key + "_y"] = delta_y
 
-    x_min, x_max, y_min, y_max = [-46.3, -43.4, 40.9, 74.8]
-    cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
-    constraints += cons
-    constraints.append(delta_lane <= 4)
-    deltas["lane"] = delta_lane
+    # x_min, x_max, y_min, y_max = [-46.3, -43.4, 40.9, 74.8]
+    # cons, delta_lane = stay_in_lane(x_var, x_min, x_max, y_min, y_max, N)
+    # constraints += cons
+    # constraints.append(delta_lane <= 4)
+    # deltas["lane"] = delta_lane
 
     y_exit = 0
     cons, delta_inter = clear_intersection(x_var, y_exit, N)
@@ -218,7 +218,8 @@ def solve_mpc_soft(computed, agents, cfg, client):
         control_rate += cp.norm(u_var[:, k+1] - u_var[:, k], 1)
 
     eps = 1e-2  
-    objective = cp.Minimize(sum(deltas.values()) + eps * (control_rate + traj_cost))
+    # objective = cp.Minimize(sum(deltas.values()) + eps * (control_rate + traj_cost))
+    objective = cp.Minimize(sum(deltas.values()))
 
     prob = cp.Problem(objective, constraints)
 
