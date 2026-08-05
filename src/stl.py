@@ -22,8 +22,7 @@ def safe_distance_vehicle(
     margin_x = ego_w / 2.0 + veh_w / 2.0 + d_safe
     margin_y = ego_l / 2.0 + veh_l / 2.0 + d_safe
 
-    delta_x = cp.Variable(nonneg=True, name=f"delta_x_{label}")
-    delta_y = cp.Variable(nonneg=True, name=f"delta_y_{label}")
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
     constraints = []
 
     for k in range(N):
@@ -36,20 +35,12 @@ def safe_distance_vehicle(
         px = x_var[0, k]
         py = x_var[1, k]
 
-        constraints.append((ax - px) <= -margin_x + delta_x + big_M * (1 - z[0]))
-        constraints.append((ax - px) >=  margin_x - delta_x - big_M * (1 - z[1]))
-        constraints.append((ay - py) <= -margin_y + delta_y + big_M * (1 - z[2]))
-        constraints.append((ay - py) >=  margin_y - delta_y - big_M * (1 - z[3]))
+        constraints.append((ax - px) <= -margin_x + delta + big_M * (1 - z[0]))
+        constraints.append((ax - px) >=  margin_x - delta - big_M * (1 - z[1]))
+        constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - z[2]))
+        constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - z[3]))
 
-    # option A: guaranteed feasible, allows full overlap
-    # constraints.append(delta_x <= margin_x)
-    # constraints.append(delta_y <= margin_y)
-
-    # option B: tighter bound, may be infeasible (triggers fallback)
-    # constraints.append(delta_x <= d_safe)
-    # constraints.append(delta_y <= d_safe)
-
-    return constraints, delta_x, delta_y
+    return constraints, delta
 
 
 def safe_distance_walker(
@@ -73,8 +64,7 @@ def safe_distance_walker(
     margin_x = ego_w / 2.0 + d_safe
     margin_y = ego_l / 2.0 + d_safe
 
-    delta_x = cp.Variable(nonneg=True, name=f"delta_x_{label}")
-    delta_y = cp.Variable(nonneg=True, name=f"delta_y_{label}")
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
     constraints = []
 
     for k in range(N):
@@ -88,20 +78,12 @@ def safe_distance_walker(
         px = x_var[0, k]
         py = x_var[1, k]
 
-        constraints.append((ax - px) <= -margin_x + delta_x + big_M * (1 - z[0]))  # left
-        constraints.append((ax - px) >=  margin_x - delta_x - big_M * (1 - z[1]))  # right
-        constraints.append((ay - py) <= -margin_y + delta_y + big_M * (1 - z[2]))  # below
-        constraints.append((ay - py) >=  margin_y - delta_y - big_M * (1 - z[3]))  # above
+        constraints.append((ax - px) <= -margin_x + delta + big_M * (1 - z[0]))  # left
+        constraints.append((ax - px) >=  margin_x - delta - big_M * (1 - z[1]))  # right
+        constraints.append((ay - py) <= -margin_y + delta + big_M * (1 - z[2]))  # below
+        constraints.append((ay - py) >=  margin_y - delta - big_M * (1 - z[3]))  # above
 
-    # option A: guaranteed feasible, allows full overlap
-    # constraints.append(delta_x <= margin_x)
-    # constraints.append(delta_y <= margin_y)
-
-    # option B: tighter bound, may be infeasible (triggers fallback)
-    # constraints.append(delta_x <= d_safe)
-    # constraints.append(delta_y <= d_safe)
-
-    return constraints, delta_x, delta_y
+    return constraints, delta
 
 
 def stay_in_lane(

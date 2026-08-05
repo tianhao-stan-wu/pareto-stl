@@ -18,6 +18,7 @@ from src.utils import (
     save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
 )
 from src.mpc import build_and_solve_mpc
+from src.mpc_pareto import solve_mpc_pareto
 
 
 def main():
@@ -120,7 +121,8 @@ def main():
                 v3.step(acc=-1, steer=0.5)
                 v4.step(acc=-1, steer=0.5)
        
-                result = build_and_solve_mpc(client, agents, cfg)
+                # result = build_and_solve_mpc(client, agents, cfg)
+                result = solve_mpc_pareto(client, agents, cfg)
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])
