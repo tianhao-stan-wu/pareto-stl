@@ -17,7 +17,7 @@ from src.utils import (
     set_all_lights_green, setup_logging, setup_camera, save_frame, 
     save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
 )
-from src.mpc import build_and_solve_mpc
+# from src.mpc import build_and_solve_mpc
 from src.mpc_pareto import solve_mpc_pareto
 
 
