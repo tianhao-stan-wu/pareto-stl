@@ -99,19 +99,9 @@ def main():
                 v3.step(acc=0.1, steer=0.5)
                 v4.step(acc=0.15, steer=0.5)
 
-            elif tick <= end_tick:
-
-                ego.step()      
-                amb.random_step()
-                ped.random_step()
-
-                v1.step()
-                v2.step()
-                v3.step(acc=-1, steer=0.5)
-                v4.step(acc=-1, steer=0.5)
-
             # elif tick <= end_tick:
 
+            #     ego.step()      
             #     amb.random_step()
             #     ped.random_step()
 
@@ -119,20 +109,30 @@ def main():
             #     v2.step()
             #     v3.step(acc=-1, steer=0.5)
             #     v4.step(acc=-1, steer=0.5)
+
+            elif tick <= end_tick:
+
+                amb.random_step()
+                ped.random_step()
+
+                v1.step()
+                v2.step()
+                v3.step(acc=-1, steer=0.5)
+                v4.step(acc=-1, steer=0.5)
        
-            #     result = build_and_solve_mpc(client, agents, cfg)
-            #     ego.apply_control(result["control"])
+                result = build_and_solve_mpc(client, agents, cfg)
+                ego.apply_control(result["control"])
 
-            #     build_times.append(result["t_build"])
-            #     solve_times.append(result["t_solve"])
+                build_times.append(result["t_build"])
+                solve_times.append(result["t_solve"])
                
-            #     if num_constraints is None:
-            #         num_constraints = result["num_constraints"]
-            #         num_variables = result["num_variables"]
+                if num_constraints is None:
+                    num_constraints = result["num_constraints"]
+                    num_variables = result["num_variables"]
 
-            #     for agent in agents:
-            #         loc = agent.get_transform().location
-            #         agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
+                for agent in agents:
+                    loc = agent.get_transform().location
+                    agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
 
             else:
                 print("End of simulation")

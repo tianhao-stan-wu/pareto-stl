@@ -21,7 +21,7 @@ mpc:
   num_samples: 100        
   sim_start: 5     
   sim_end: 8
-  type: "soft"
+  type: "pareto"
   density: 2
 
 stl:
