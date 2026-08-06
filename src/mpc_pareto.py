@@ -350,9 +350,9 @@ def solve_mpc_pareto(client, agents, cfg):
             "mode":            mode,
             "x_opt":           x_var.value,
             "u_opt":           u_var.value,
-            "r_ped":           float(r_ped_expr.value),
-            "r_ego":           float(r_ego_expr.value),
-            "r_amb":           float(r_amb_expr.value),
+            # "r_ped":           float(r_ped_expr.value),
+            # "r_ego":           float(r_ego_expr.value),
+            # "r_amb":           float(r_amb_expr.value),
             "deltas":          {k: float(v.value) for k, v in deltas.items()
                                 if v.value is not None},
             "t_build":         t_build,
