@@ -88,7 +88,7 @@ def _select_worst(ego_pos_nom, trajs, k) -> np.ndarray:
 
 
 def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
-                  d_coll, mu, V_agent, V_ego, sev_scale, dt):
+                  d_coll, mu, V_agent, V_ego, sev_scale, dt, S):
     """
     Compute fixed per-scenario risk weights from the *nominal* ego trajectory.
     Severity = mu * ||v_ego - v_agent|| / sev_scale.
@@ -106,8 +106,8 @@ def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
         t       = hits[0]
         v_agent = (pos[t] - pos[t-1]) / dt if t > 0 else np.zeros(2)
         sev     = mu * np.linalg.norm(ego_vel_nom[t] - v_agent) / sev_scale
-        r_agent[n] = sev * V_agent / K
-        r_ego[n]   = sev * V_ego   / K
+        r_agent[n] = sev * V_agent / S
+        r_ego[n]   = sev * V_ego   / S
     return r_agent, r_ego
 
 
@@ -249,10 +249,12 @@ def solve_mpc_pareto(client, agents, cfg):
 
     # ── 3. Per-scenario risk weights (fixed scalars, computed on nominal traj) ──
     r_ped, r_ego_p = _risk_weights(ego_pos_nom, ego_vel_nom, ped_trajs,
-                                   d_ped, mu_ped, _V_PED, _V_EGO, 1000., dt)
+                                   d_ped, mu_ped, _V_PED, _V_EGO, 1000., dt, S)
     r_amb, r_ego_a = _risk_weights(ego_pos_nom, ego_vel_nom, amb_trajs,
-                                   d_amb, mu_amb, _V_AMB, _V_EGO,   50., dt)
+                                   d_amb, mu_amb, _V_AMB, _V_EGO,   50., dt, S)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
+
+    print(f"r_ped: {r_ped}, r_amb: {r_amb}, r_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.GLPK_MI, cp.SCIP, cp.ECOS_BB]
@@ -415,3 +417,5 @@ def solve_mpc_pareto(client, agents, cfg):
         "num_constraints": best["num_constraints"],
         "num_variables":   best["num_variables"],
     }
+
+
