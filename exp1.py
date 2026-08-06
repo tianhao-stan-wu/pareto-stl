@@ -75,11 +75,11 @@ def main():
 
             client.tick()
 
-            speed_kmh = ego.get_speed()
-            print(f"Ego Speed: {speed_kmh:.2f} km/h")
+            # speed_kmh = ego.get_speed()
+            # print(f"Ego Speed: {speed_kmh:.2f} km/h")
 
-            speed_kmh = amb.get_speed()
-            print(f"Amb Speed: {speed_kmh:.2f} km/h")
+            # speed_kmh = amb.get_speed()
+            # print(f"Amb Speed: {speed_kmh:.2f} km/h")
 
             # save carla image
             if tick == camera_tick:

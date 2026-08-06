@@ -295,21 +295,24 @@ def solve_mpc_pareto(client, agents, cfg):
         deltas = {}
         c, d_ped_stl = safe_distance_walker(
             x_var, ped_trajs.mean(axis=0), ego.width, ego.length, d_ped, label="ped")
-        cons += c;  deltas["ped"] = d_ped_stl
+        cons += c
+        deltas["ped"] = d_ped_stl
 
         c, d_amb_stl = safe_distance_vehicle(
             x_var, amb_trajs.mean(axis=0), ego.width, ego.length,
             amb.width, amb.length, d_amb, label="amb")
-        cons += c;  deltas["amb"] = d_amb_stl
+        cons += c
+        deltas["amb"] = d_amb_stl
 
         c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
-        cons += c;  deltas["inter"] = d_int
+        cons += c 
+        deltas["inter"] = d_int
 
         # MILP risk encoding
         z_ped_var, r_ped_expr, c_ped = _encode_collision(
-            x_var, ped_trajs, r_ped, mx_ped, my_ped, "ped")
+            x_var, ped_trajs, r_ped, d_ped, d_ped, "ped")
         z_amb_var, r_amb_expr, c_amb = _encode_collision(
-            x_var, amb_trajs, r_amb, mx_amb, my_amb, "amb")
+            x_var, amb_trajs, r_amb, d_amb, d_amb, "amb")
         cons += c_ped + c_amb
 
         # z_any[n] = z_ped[n] OR z_amb[n]  -> ego risk indicator
@@ -336,6 +339,7 @@ def solve_mpc_pareto(client, agents, cfg):
         t1 = time.perf_counter()
         prob.solve(solver=solver, verbose=False)
         t_solve = time.perf_counter() - t1
+        print(f"t_solve: {t_solve}, n_cons: {n_cons}, n_vars: {n_vars}")
 
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             return None
