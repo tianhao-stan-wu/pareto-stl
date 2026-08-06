@@ -308,28 +308,29 @@ def solve_mpc_pareto(client, agents, cfg):
         cons += c 
         deltas["inter"] = d_int
 
-        # MILP risk encoding
-        z_ped_var, r_ped_expr, c_ped = _encode_collision(
-            x_var, ped_trajs, r_ped, d_ped, d_ped, "ped")
-        z_amb_var, r_amb_expr, c_amb = _encode_collision(
-            x_var, amb_trajs, r_amb, d_amb, d_amb, "amb")
-        cons += c_ped + c_amb
+        # # MILP risk encoding
+        # z_ped_var, r_ped_expr, c_ped = _encode_collision(
+        #     x_var, ped_trajs, r_ped, d_ped, d_ped, "ped")
+        # z_amb_var, r_amb_expr, c_amb = _encode_collision(
+        #     x_var, amb_trajs, r_amb, d_amb, d_amb, "amb")
+        # cons += c_ped + c_amb
 
-        # z_any[n] = z_ped[n] OR z_amb[n]  -> ego risk indicator
-        z_any = cp.Variable(_K_TAIL, boolean=True, name="z_any")
-        for n in range(_K_TAIL):
-            cons += [z_any[n] >= z_ped_var[n],
-                     z_any[n] >= z_amb_var[n],
-                     z_any[n] <= z_ped_var[n] + z_amb_var[n]]
-        r_ego_expr = cp.sum(cp.multiply(r_ego, z_any))
+        # # z_any[n] = z_ped[n] OR z_amb[n]  -> ego risk indicator
+        # z_any = cp.Variable(_K_TAIL, boolean=True, name="z_any")
+        # for n in range(_K_TAIL):
+        #     cons += [z_any[n] >= z_ped_var[n],
+        #              z_any[n] >= z_amb_var[n],
+        #              z_any[n] <= z_ped_var[n] + z_amb_var[n]]
+        # r_ego_expr = cp.sum(cp.multiply(r_ego, z_any))
 
-        # epsilon constraints on non-minimised objectives
-        risk_exprs = {"ped": r_ped_expr, "ego": r_ego_expr, "amb": r_amb_expr}
-        for name, eps_val in eps_dict.items():
-            cons.append(risk_exprs[name] <= float(eps_val))
+        # # epsilon constraints on non-minimised objectives
+        # risk_exprs = {"ped": r_ped_expr, "ego": r_ego_expr, "amb": r_amb_expr}
+        # for name, eps_val in eps_dict.items():
+        #     cons.append(risk_exprs[name] <= float(eps_val))
 
         # minimise chosen risk; small delta penalty keeps STL slack tight
-        objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
+        # objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
+        objective = cp.Minimize(sum(deltas.values()))
         prob = cp.Problem(objective, cons)
 
         n_cons  = sum(c.size for c in cons)
