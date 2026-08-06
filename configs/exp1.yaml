@@ -22,7 +22,7 @@ mpc:
   sim_start: 5     
   sim_end: 8
   type: "pareto"
-  density: 2
+  density: 1
 
 stl:
   pedestrian: 2   
