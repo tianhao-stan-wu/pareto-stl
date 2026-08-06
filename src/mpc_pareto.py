@@ -9,6 +9,34 @@ from src.bicycle import KinematicBicycle
 from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
 
+import gurobipy as gp
+
+# module-level, created once
+_GRB_ENV = gp.Env(params={"OutputFlag": 0})
+
+_GRB_PARAMS = dict(
+    # ── termination ──────────────────────────────────────────────
+    TimeLimit    = 10.0,   # per-solve wall clock cap
+    MIPGap       = 0.0,    # 0 for paper results; 0.02 for speed
+
+    # ── big-M numerics: the ones that matter most for you ────────
+    IntFeasTol   = 1e-7,   # tighter than default 1e-5; with M=500 a
+                           # binary at 1e-5 leaks 5e-3 into the constraint
+    NumericFocus = 2,      # 0-3; raise if you see "numerical trouble" warnings
+    Presolve     = 2,      # aggressive — tightens big-M coefficients
+
+    # ── search strategy ──────────────────────────────────────────
+    MIPFocus     = 1,      # 1 = find good feasible solutions fast
+                           # 2 = prove optimality  3 = improve bound
+    Heuristics   = 0.1,    # more time on heuristics than default 0.05
+    Cuts         = 2,      # aggressive cuts help indicator-style models
+
+    # ── determinism for reproducible paper numbers ───────────────
+    Threads      = 4,      # fix it; don't let it vary by machine
+    Seed         = 0,
+)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Physical constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,7 +302,7 @@ def solve_mpc_pareto(client, agents, cfg):
                   "amb": ["ped", "ego"]}
 
     # ── 6. Single MPC solve ───────────────────────────────────────────────────
-    def _solve_one(mode, eps_dict):
+    def _solve_one(mode, eps_dict, warm=None):
         """
         Build and solve one epsilon-constraint MILP.
 
@@ -341,7 +369,14 @@ def solve_mpc_pareto(client, agents, cfg):
         t_build = time.perf_counter() - t0
 
         t1 = time.perf_counter()
-        prob.solve(solver=solver, verbose=False)
+
+        if warm is not None:
+            x_var.value = warm["x_opt"]        # cvxpy passes these as MIP start
+            u_var.value = warm["u_opt"]
+            prob.solve(solver=cp.GUROBI, env=_GRB_ENV, warm_start=True, **_GRB_PARAMS)
+        else:
+            prob.solve(solver=cp.GUROBI, env=_GRB_ENV, **_GRB_PARAMS)
+
         t_solve = time.perf_counter() - t1
         print(f"t_solve: {t_solve}, n_cons: {n_cons}, n_vars: {n_vars}")
 
@@ -372,16 +407,18 @@ def solve_mpc_pareto(client, agents, cfg):
     for mode, axes in _free_axes.items():
         combos = list(itertools.product(eps_grid, repeat=len(axes)))   # density^2
         print(f"\n  -- min r_{mode}  ({len(combos)} grid pts) --")
+        warm = None
         for combo in combos:
             eps_dict = dict(zip(axes, combo))
             tag = "  ".join(f"e_{k}={v:.2f}" for k, v in eps_dict.items())
             print(f"    {tag}", end=" ... ", flush=True)
-            sol = _solve_one(mode, eps_dict)
+            sol = _solve_one(mode, eps_dict, warm=warm)
             if sol is None:
                 print("INFEASIBLE")
             else:
                 print(f"OK  ({sol['r_ped']:.3f}, {sol['r_ego']:.3f}, {sol['r_amb']:.3f})"
                       f"  {sol['t_solve']:.2f}s")
+                warm = sol 
                 results.append(sol)
 
     # ── 8. Fallback if all infeasible ─────────────────────────────────────────
