@@ -370,6 +370,7 @@ def solve_mpc_pareto(client, agents, cfg):
             print(f"    {tag}", end=" ... ", flush=True)
             sol = _solve_one(mode, eps_dict)
             if sol is None:
+                print(f"[{prob.status}]", end=" ")
                 print("INFEASIBLE")
             else:
                 print(f"OK  ({sol['r_ped']:.3f}, {sol['r_ego']:.3f}, {sol['r_amb']:.3f})"
