@@ -257,14 +257,14 @@ def solve_mpc_pareto(client, agents, cfg):
     print(f"r_ped: {r_ped}, r_amb: {r_amb}, r_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
-    solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.GLPK_MI, cp.SCIP, cp.ECOS_BB]
+    solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
                    if s in cp.installed_solvers()), None)
     if solver is None:
         raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
     else:
-        print(f"Selected solver: {solver}")
         print(f"Installed: {cp.installed_solvers()}")
-
+        print(f"Selected solver: {solver}")
+        
     # ── 5. Epsilon grid: density points in (0, 1] per axis ───────────────────
     eps_grid = np.linspace(0, 1, density + 1)[1:]   # e.g. [0.5, 1.0] for density=2
 
