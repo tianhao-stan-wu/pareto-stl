@@ -6,7 +6,7 @@ import math
 import time
 
 from src.bicycle import KinematicBicycle
-from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection
+from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
 
 import gurobipy as gp
@@ -15,24 +15,24 @@ import gurobipy as gp
 _GRB_ENV = gp.Env(params={"OutputFlag": 0})
 
 _GRB_PARAMS = dict(
-    # ── termination ──────────────────────────────────────────────
+    # termination
     TimeLimit    = 10.0,   # per-solve wall clock cap
     MIPGap       = 0.0,    # 0 for paper results; 0.02 for speed
 
-    # ── big-M numerics: the ones that matter most for you ────────
+    # big-M numerics: the ones that matter most for you 
     IntFeasTol   = 1e-7,   # tighter than default 1e-5; with M=500 a
                            # binary at 1e-5 leaks 5e-3 into the constraint
     NumericFocus = 2,      # 0-3; raise if you see "numerical trouble" warnings
     Presolve     = 2,      # aggressive — tightens big-M coefficients
 
-    # ── search strategy ──────────────────────────────────────────
+    # search strategy
     MIPFocus     = 1,      # 1 = find good feasible solutions fast
                            # 2 = prove optimality  3 = improve bound
     Heuristics   = 0.1,    # more time on heuristics than default 0.05
     Cuts         = 2,      # aggressive cuts help indicator-style models
 
-    # ── determinism for reproducible paper numbers ───────────────
-    Threads      = 4,      # fix it; don't let it vary by machine
+    # determinism for reproducible paper numbers
+    Threads      = 4,      
     Seed         = 0,
 )
 
@@ -231,8 +231,8 @@ def solve_mpc_pareto(client, agents, cfg):
     """
     Multi-objective MPC via epsilon-constraint method with MILP risk encoding.
 
-    Objectives  : r_ped, r_ego, r_amb  (CVaR-selected worst-5 scenarios each)
-    STL cons    : safe_distance (ped, amb) + clear_intersection  [soft, delta-relaxed]
+    Objectives  : r_ped, r_ego, r_amb
+    STL cons    : safe_distance (ped, amb) + clear_intersection + lane_keeping
     Epsilon grid: density evenly-spaced values in (0,1] per free axis
                   -> density^2 grid points per mode, 3*density^2 total solves
     Selection   : Pareto-filter then pick control closest to nominal first step.
@@ -252,10 +252,6 @@ def solve_mpc_pareto(client, agents, cfg):
     d_amb   = float(cfg["stl"]["ambulance"])
 
     ego, amb, ped = agents[0], agents[1], agents[2]
-
-    # Minkowski half-extents for collision margin per agent
-    mx_ped, my_ped = ego.width/2 + d_ped,                ego.length/2 + d_ped
-    mx_amb, my_amb = ego.width/2 + amb.width/2 + d_amb,  ego.length/2 + amb.length/2 + d_amb
 
     mu_ped = (_M_EGO * _M_PED) / (_M_EGO + _M_PED)
     mu_amb = (_M_EGO * _M_AMB) / (_M_EGO + _M_AMB)
@@ -282,7 +278,7 @@ def solve_mpc_pareto(client, agents, cfg):
                                    d_amb, mu_amb, _V_AMB, _V_EGO,   50., dt, S)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
-    print(f"r_ped: {r_ped}, r_amb: {r_amb}, r_ego:{r_ego}")
+    print(f"r_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
@@ -290,7 +286,7 @@ def solve_mpc_pareto(client, agents, cfg):
     if solver is None:
         raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
     else:
-        print(f"Installed: {cp.installed_solvers()}")
+        print(f"Installed solver: {cp.installed_solvers()}")
         print(f"Selected solver: {solver}")
         
     # ── 5. Epsilon grid: density points in (0, 1] per axis ───────────────────
@@ -335,6 +331,10 @@ def solve_mpc_pareto(client, agents, cfg):
         cons += c
         deltas["amb"] = d_amb_stl
 
+        c, d_lane = stay_in_lane(x_var, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
+        cons += c 
+        deltas["lane"] = d_lane
+
         c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
         cons += c 
         deltas["inter"] = d_int
@@ -359,8 +359,24 @@ def solve_mpc_pareto(client, agents, cfg):
         for name, eps_val in eps_dict.items():
             cons.append(risk_exprs[name] <= float(eps_val))
 
+        W_BETA      = 5e-2    # steering magnitude
+        W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
+        W_STL       = 1e-3 
+
+        # L1 version — keeps the problem a pure MILP
+        s_beta = cp.Variable(N - 1, nonneg=True)
+        cons += [s_beta >=  cp.diff(u_var[1, :]),
+                 s_beta >= -cp.diff(u_var[1, :])]
+        smoothness = W_DBETA * cp.sum(s_beta) + W_BETA * cp.norm(u_var[1, :], 1)
+
+        objective = cp.Minimize(
+            risk_exprs[mode]
+            + W_STL * sum(deltas.values())
+            + smoothness
+        )
+
         # minimise chosen risk; small delta penalty keeps STL slack tight
-        objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
+        # objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
         # objective = cp.Minimize(sum(deltas.values()))
         prob = cp.Problem(objective, cons)
 
@@ -378,7 +394,7 @@ def solve_mpc_pareto(client, agents, cfg):
             prob.solve(solver=cp.GUROBI, env=_GRB_ENV, **_GRB_PARAMS)
 
         t_solve = time.perf_counter() - t1
-        print(f"t_solve: {t_solve}, n_cons: {n_cons}, n_vars: {n_vars}")
+        print(f"t_solve: {t_solve:.3f}, n_cons: {n_cons}, n_vars: {n_vars}")
 
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
             print(f"[{prob.status}]", end=" ")
@@ -388,12 +404,9 @@ def solve_mpc_pareto(client, agents, cfg):
             "mode":            mode,
             "x_opt":           x_var.value,
             "u_opt":           u_var.value,
-            # "r_ped":           float(r_ped_expr.value),
-            # "r_ego":           float(r_ego_expr.value),
-            # "r_amb":           float(r_amb_expr.value),
-            "r_ped":           0,
-            "r_ego":           0,
-            "r_amb":           0,
+            "r_ped":           float(r_ped_expr.value),
+            "r_ego":           float(r_ego_expr.value),
+            "r_amb":           float(r_amb_expr.value),
             "deltas":          {k: float(v.value) for k, v in deltas.items()
                                 if v.value is not None},
             "t_build":         t_build,
@@ -411,7 +424,7 @@ def solve_mpc_pareto(client, agents, cfg):
         for combo in combos:
             eps_dict = dict(zip(axes, combo))
             tag = "  ".join(f"e_{k}={v:.2f}" for k, v in eps_dict.items())
-            print(f"    {tag}", end=" ... ", flush=True)
+            print(f"    {tag}", end=" ... \n", flush=True)
             sol = _solve_one(mode, eps_dict, warm=warm)
             if sol is None:
                 print("INFEASIBLE")
@@ -442,10 +455,10 @@ def solve_mpc_pareto(client, agents, cfg):
     # ── 10. Debug draw ────────────────────────────────────────────────────────
     draw_sample_traj(client.world, best["x_opt"][:2, :].T,
                      color=COLORS["blue"],  life_time=lt)
-    draw_sample_traj(client.world, ped_trajs,
-                     color=COLORS["green"], life_time=lt)
-    draw_sample_traj(client.world, amb_trajs,
-                     color=COLORS["red"],   life_time=lt)
+    # draw_sample_traj(client.world, ped_trajs,
+    #                  color=COLORS["green"], life_time=lt)
+    # draw_sample_traj(client.world, amb_trajs,
+    #                  color=COLORS["red"],   life_time=lt)
 
     # ── 11. Convert first control step to CARLA VehicleControl ───────────────
     a, beta = best["u_opt"][:, 0]
@@ -456,6 +469,8 @@ def solve_mpc_pareto(client, agents, cfg):
     print(f"  Best [{best['mode']}]: "
           f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})  "
           f"deltas={best['deltas']}")
+    print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
+    print("\n")
 
     return {
         "status":          True,

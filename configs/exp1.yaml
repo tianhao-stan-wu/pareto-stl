@@ -56,7 +56,7 @@ ambulance:
   behavior: "normal"
   target_speed: 30
   spawn:
-    location: {x: -45.146, y: 100.043, z: 2.194}
+    location: {x: -45.146, y: 90.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
   destination:
     location: {x: -45.654, y: 3.146, z: 2.324}
@@ -68,9 +68,9 @@ ambulance:
   beta_max: 0.133
   width: 2.35   
   length: 6.37 
-  std_acc: 0.1
-  std_steer: 0.02
-  warmup: 0.93
+  std_acc: 0.2
+  std_steer: 0.05
+  warmup: 0.95
   proximity_threshold: 5
 
 pedestrian:
@@ -78,8 +78,8 @@ pedestrian:
     location: {x: -22.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
   mean_speed: 4
-  std_speed: 1
-  std_dir: 0.05
+  std_speed: 1.5
+  std_dir: 0.1
 
 # other road vehicles
 v1:
