@@ -273,9 +273,9 @@ def solve_mpc_pareto(client, agents, cfg):
 
     # ── 3. Per-scenario risk weights (fixed scalars, computed on nominal traj) ──
     r_ped, r_ego_p = _risk_weights(ego_pos_nom, ego_vel_nom, ped_trajs,
-                                   d_ped, mu_ped, _V_PED, _V_EGO, _S_PED., dt, _K_TAIL)
+                                   d_ped, mu_ped, _V_PED, _V_EGO, _S_PED, dt, _K_TAIL)
     r_amb, r_ego_a = _risk_weights(ego_pos_nom, ego_vel_nom, amb_trajs,
-                                   d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB., dt, _K_TAIL)
+                                   d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB, dt, _K_TAIL)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
     print(f"r_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
@@ -361,7 +361,7 @@ def solve_mpc_pareto(client, agents, cfg):
 
         W_BETA      = 5e-2    # steering magnitude
         W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
-        W_STL       = 1e-3 
+        W_STL       = 1e-2 
 
         # L1 version — keeps the problem a pure MILP
         s_beta = cp.Variable(N - 1, nonneg=True)
