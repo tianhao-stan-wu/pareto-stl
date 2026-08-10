@@ -16,22 +16,20 @@ _GRB_ENV = gp.Env(params={"OutputFlag": 0})
 
 _GRB_PARAMS = dict(
     # termination
-    TimeLimit    = 10.0,   # per-solve wall clock cap
-    MIPGap       = 0.0,    # 0 for paper results; 0.02 for speed
+    TimeLimit    = 10.0,   
+    MIPGap       = 0.0,    
 
-    # big-M numerics: the ones that matter most for you 
-    IntFeasTol   = 1e-7,   # tighter than default 1e-5; with M=500 a
-                           # binary at 1e-5 leaks 5e-3 into the constraint
-    NumericFocus = 2,      # 0-3; raise if you see "numerical trouble" warnings
-    Presolve     = 2,      # aggressive — tightens big-M coefficients
+    # big-M numerics
+    IntFeasTol   = 1e-7,   
+    NumericFocus = 2,      
+    Presolve     = 2,      
 
     # search strategy
-    MIPFocus     = 1,      # 1 = find good feasible solutions fast
-                           # 2 = prove optimality  3 = improve bound
-    Heuristics   = 0.1,    # more time on heuristics than default 0.05
-    Cuts         = 2,      # aggressive cuts help indicator-style models
+    MIPFocus     = 1,      
+    Heuristics   = 0.1,    
+    Cuts         = 2,      
 
-    # determinism for reproducible paper numbers
+    # determinism for reproducibility
     Threads      = 4,      
     Seed         = 0,
 )
@@ -41,9 +39,11 @@ _GRB_PARAMS = dict(
 # Physical constants
 # ─────────────────────────────────────────────────────────────────────────────
 _M_EGO, _M_PED, _M_AMB = 1850.0,  70.0, 4500.0
-_V_PED, _V_AMB, _V_EGO =    1.0,   0.5,    0.5
+_V_PED, _V_AMB, _V_EGO = 1.0,   0.1,    0.2
+_S_PED, _S_AMB         = 1000, 6000
+
 _BIG_M, _EPS_STRICT     =  500.0,  1e-3      # Big-M and strict-inequality gap
-_K_TAIL                 =    5              # CVaR tail size (worst 5 of 100, alpha=0.95)
+_K_TAIL                 =    20              # CVaR tail size (worst 5 of 100, alpha=0.95)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -261,21 +261,21 @@ def solve_mpc_pareto(client, agents, cfg):
     ego_init = _ego_state(ego)
     X_nom, U_nom, A_seq, B_seq, c_seq = _build_nominal(ego, model, dt, N, ego_init)
 
-    ego_pos_nom = X_nom[:, :2]                                       # (N+1, 2)
-    ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           # (N+1, 2)
+    ego_pos_nom = X_nom[:, :2]                                       
+    ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           
                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
 
     # ── 2. Sample 100 trajectories, select worst 5 per agent (CVaR alpha=0.95) ──
-    ped_trajs = ped.sample_trajectories(N, dt, S)                            # (100, N+1, 2)
-    amb_trajs = amb.sample_trajectories(N, dt, S)                            # (100, N+1, 2)
-    ped_trajs = ped_trajs[_select_worst(ego_pos_nom, ped_trajs, _K_TAIL)]    # (5, N+1, 2)
-    amb_trajs = amb_trajs[_select_worst(ego_pos_nom, amb_trajs, _K_TAIL)]    # (5, N+1, 2)
+    ped_trajs = ped.sample_trajectories(N, dt, S)                            
+    amb_trajs = amb.sample_trajectories(N, dt, S)                            
+    ped_trajs = ped_trajs[_select_worst(ego_pos_nom, ped_trajs, _K_TAIL)]    
+    amb_trajs = amb_trajs[_select_worst(ego_pos_nom, amb_trajs, _K_TAIL)]    
 
     # ── 3. Per-scenario risk weights (fixed scalars, computed on nominal traj) ──
     r_ped, r_ego_p = _risk_weights(ego_pos_nom, ego_vel_nom, ped_trajs,
-                                   d_ped, mu_ped, _V_PED, _V_EGO, 1000., dt, S)
+                                   d_ped, mu_ped, _V_PED, _V_EGO, _S_PED., dt, _K_TAIL)
     r_amb, r_ego_a = _risk_weights(ego_pos_nom, ego_vel_nom, amb_trajs,
-                                   d_amb, mu_amb, _V_AMB, _V_EGO,   50., dt, S)
+                                   d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB., dt, _K_TAIL)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
     print(f"r_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
@@ -455,10 +455,6 @@ def solve_mpc_pareto(client, agents, cfg):
     # ── 10. Debug draw ────────────────────────────────────────────────────────
     draw_sample_traj(client.world, best["x_opt"][:2, :].T,
                      color=COLORS["blue"],  life_time=lt)
-    # draw_sample_traj(client.world, ped_trajs,
-    #                  color=COLORS["green"], life_time=lt)
-    # draw_sample_traj(client.world, amb_trajs,
-    #                  color=COLORS["red"],   life_time=lt)
 
     # ── 11. Convert first control step to CARLA VehicleControl ───────────────
     a, beta = best["u_opt"][:, 0]

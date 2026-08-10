@@ -25,8 +25,8 @@ mpc:
   density: 1
 
 stl:
-  pedestrian: 2   
-  ambulance: 4
+  pedestrian: 3   
+  ambulance: 5
 
 ego_vehicle:
   blueprint: "vehicle.tesla.model3"
