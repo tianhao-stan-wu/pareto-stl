@@ -92,7 +92,7 @@ def check_feasibility(client, agents, cfg):
 
     t1 = time.perf_counter()
 
-    prob.solve(solver=cp.GUROBI, env=_GRB_ENV)
+    prob.solve(solver=cp.GUROBI)
 
     t_solve = time.perf_counter() - t1
 
