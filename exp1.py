@@ -20,7 +20,7 @@ from src.utils import (
     save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
 )
 
-from exp1.mpc_pareto import solve_mpc_pareto
+from exp1.mpc import solve_mpc_pareto
 from exp1.check_feas import check_feasibility
 
 
