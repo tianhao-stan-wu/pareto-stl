@@ -79,12 +79,14 @@ def main():
     #     print(f"Installed solver: {cp.installed_solvers()}")
     #     print(f"Selected solver: {solver} \n")
 
-    # try:
-    #     while True:
+    try:
+        while True:
+            break
 
-    #         print(f"tick: {tick} \n")
 
-    #         client.tick()
+            # print(f"tick: {tick} \n")
+
+            # client.tick()
 
     #         # speed_kmh = ego.get_speed()
     #         # print(f"Ego Speed: {speed_kmh:.2f} km/h")
@@ -158,11 +160,11 @@ def main():
 
     #         tick += 1
 
-    # finally:
+    finally:
         
-    #     camera.stop()
-    #     camera.destroy()
-    #     client.quit(destroy=True)
+        # camera.stop()
+        # camera.destroy()
+        client.quit(destroy=True)
 
     #     save_stats(build_times, solve_times, num_constraints, num_variables, log_dir)
     #     save_trajectories(agent_trajectories, log_dir)
