@@ -20,7 +20,6 @@ import gurobipy as gp
 
 
 DELTA_TOL = 1e-5
-_GRB_ENV = gp.Env(params={"OutputFlag": 0})
 
 def check_feasibility(client, agents, cfg):
     """
@@ -48,17 +47,8 @@ def check_feasibility(client, agents, cfg):
                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
 
     # ── 2. Sample 100 trajectories
-    ped_trajs = ped.sample_trajectories(N, dt, S*100)                            
-    amb_trajs = amb.sample_trajectories(N, dt, S*100)                            
-
-    # ── 3. Solver ─────────────────────────────────────────────────────────────
-    solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
-                   if s in cp.installed_solvers()), None)
-    if solver is None:
-        raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
-    else:
-        print(f"Installed solver: {cp.installed_solvers()}")
-        print(f"Selected solver: {solver}", end="\n\n")
+    ped_trajs = ped.sample_trajectories(N, dt, S*10)                            
+    amb_trajs = amb.sample_trajectories(N, dt, S*10)                                
 
     t0 = time.perf_counter()
 
@@ -125,7 +115,7 @@ def check_feasibility(client, agents, cfg):
     delta_sum  = float(sum(delta_vals.values()))
     feasible   = delta_sum <= DELTA_TOL
     
-    print(f"delta_sum: {delta_sum}\n")
+    print(f"delta_sum: {delta_sum:.2f}\n")
     for k, v in delta_vals.items():
         print(f"  {k:8s}: {v:.2f}")
     print(f"\nfeasible: {feasible}")

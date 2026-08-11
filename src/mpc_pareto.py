@@ -42,8 +42,8 @@ _M_EGO, _M_PED, _M_AMB = 1850.0,  70.0, 4500.0
 _V_PED, _V_AMB, _V_EGO = 1.0,   0.1,    0.2
 _S_PED, _S_AMB         = 1000, 6000
 
-_BIG_M, _EPS_STRICT     =  500.0,  1e-3      # Big-M and strict-inequality gap
-_K_TAIL                 =    20              # CVaR tail size (worst 5 of 100, alpha=0.95)
+_BIG_M, _EPS_STRICT     =  500.0,  1e-3      
+_K_TAIL                 =    10              
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ def solve_mpc_pareto(client, agents, cfg):
                                    d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB, dt, _K_TAIL)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
-    print(f"\nr_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
+    print(f"\nr_ped: {r_ped:.4f} \nr_amb: {r_amb:.4f} \nr_ego:{r_ego:.4f}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
@@ -459,7 +459,7 @@ def solve_mpc_pareto(client, agents, cfg):
 
     print(f"  Best [{best['mode']}]: "
           f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})"
-          f"deltas={best['deltas']:.2f} \n")
+          f"deltas={best['deltas']}")
     # print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
 
     return {

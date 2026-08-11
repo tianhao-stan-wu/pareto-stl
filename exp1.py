@@ -4,6 +4,7 @@ import random
 import math
 import time
 import numpy as np
+import gurobipy as gp
 
 try:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/CARLA_0.9.15/PythonAPI/carla")
@@ -69,10 +70,18 @@ def main():
     tick = 0
     camera_tick = start_tick
 
+    solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
+                   if s in cp.installed_solvers()), None)
+    if solver is None:
+        raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
+    else:
+        print(f"Installed solver: {cp.installed_solvers()}")
+        print(f"Selected solver: {solver} \n")
+
     try:
         while True:
 
-            print(f"tick: {tick}", end="\n\n")
+            print(f"tick: {tick} \n")
 
             client.tick()
 
