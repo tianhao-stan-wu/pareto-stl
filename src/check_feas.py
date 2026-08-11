@@ -102,9 +102,6 @@ def check_feasibility(client, agents, cfg):
         print(f"Feasibility checking status: [{prob.status}]", end=" ")
         return None
 
-    draw_sample_traj(client.world, x_var.value[:2, :].T,
-                     color=COLORS["blue"],  life_time=lt)
-
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta],
                                ego.acc_min, ego.acc_max,
@@ -119,6 +116,10 @@ def check_feasibility(client, agents, cfg):
     for k, v in delta_vals.items():
         print(f"  {k:8s}: {v:.2f}")
     print(f"\nfeasible: {feasible}")
+
+    if feasible:
+        draw_sample_traj(client.world, x_var.value[:2, :].T,
+                     color=COLORS["blue"],  life_time=lt)
 
     return {
         "status":          feasible,
