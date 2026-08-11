@@ -1,19 +1,19 @@
 # params for initializing the experiment
 
 project:
-  name: "three-agent interaction"
+  name: "multi-agent interaction"
   seed: 42
-  exp: "exp1"
+  exp: "exp2"
 
 carla:
   host: "localhost"
   port: 2000
   timeout: 10.0
-  map: "Town10HD"
+  map: "Town05"
   dt: 0.1 
   sync_mode: true
   spectator:
-    location: {x: -52.211, y: 19.228, z: 6.626}
+    location: {x: 0.035, y: 4.962, z: 6.626}
     rotation: {pitch: -21.737, yaw: 81.193, roll: 0.000}
 
 mpc:
