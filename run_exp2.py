@@ -38,20 +38,18 @@ def main():
 
     client = Client(cfg)
     # camera, img_queue = setup_camera(client.world, cfg["carla"])
-    # set_all_lights_green(client.world)
+    
+    # set traffic light green
 
     # # spawn agents
-    # ego = Vehicle(client.world, cfg, "ego_vehicle")
-    # amb = Vehicle(client.world, cfg, "ambulance")
-    # ped = Walker(client.world, cfg, "pedestrian")
-    # agents = [ego, amb, ped]
+    ego = Vehicle(client.world, cfg, "ego_vehicle")
+    
+    agents = [ego,]
 
-    # amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
-
-    # v1 = Vehicle(client.world, cfg, "v1")
-    # v2 = Vehicle(client.world, cfg, "v2")
-    # v3 = Vehicle(client.world, cfg, "v3")
-    # v4 = Vehicle(client.world, cfg, "v4")
+    v1 = Vehicle(client.world, cfg, "v1")
+    v2 = Vehicle(client.world, cfg, "v2")
+    v3 = Vehicle(client.world, cfg, "v3")
+    v4 = Vehicle(client.world, cfg, "v4")
 
     # # setup
     # dt = cfg["carla"]["dt"]
