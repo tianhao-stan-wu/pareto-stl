@@ -278,16 +278,11 @@ def solve_mpc_pareto(client, agents, cfg):
                                    d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB, dt, _K_TAIL)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
-    print(f"r_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
+    print(f"\nr_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
                    if s in cp.installed_solvers()), None)
-    if solver is None:
-        raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
-    else:
-        print(f"Installed solver: {cp.installed_solvers()}")
-        print(f"Selected solver: {solver}")
         
     # ── 5. Epsilon grid: density points in (0, 1] per axis ───────────────────
     eps_grid = np.linspace(0, 1, density + 1)[1:]   # e.g. [0.5, 1.0] for density=2
@@ -463,10 +458,9 @@ def solve_mpc_pareto(client, agents, cfg):
                                ego.beta_min, ego.beta_max)
 
     print(f"  Best [{best['mode']}]: "
-          f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})  "
-          f"deltas={best['deltas']}")
-    print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
-    print("\n")
+          f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})"
+          f"deltas={best['deltas']:.2f} \n")
+    # print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
 
     return {
         "status":          True,

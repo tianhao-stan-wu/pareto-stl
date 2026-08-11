@@ -72,7 +72,7 @@ def main():
     try:
         while True:
 
-            print(f"tick: {tick}")
+            print(f"tick: {tick}", end="\n\n")
 
             client.tick()
 

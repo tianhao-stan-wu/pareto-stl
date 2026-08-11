@@ -22,27 +22,6 @@ import gurobipy as gp
 DELTA_TOL = 1e-5
 _GRB_ENV = gp.Env(params={"OutputFlag": 0})
 
-_GRB_PARAMS = dict(
-    # termination
-    TimeLimit    = 10.0,   
-    MIPGap       = 0.0,    
-
-    # big-M numerics
-    IntFeasTol   = 1e-7,   
-    NumericFocus = 2,      
-    Presolve     = 2,      
-
-    # search strategy
-    MIPFocus     = 1,      
-    Heuristics   = 0.1,    
-    Cuts         = 2,      
-
-    # determinism for reproducibility
-    Threads      = 4,      
-    Seed         = 0,
-)
-
-
 def check_feasibility(client, agents, cfg):
     """
     Solve the STL-feasibility MILP for the current tick.
@@ -69,8 +48,8 @@ def check_feasibility(client, agents, cfg):
                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
 
     # ── 2. Sample 100 trajectories
-    ped_trajs = ped.sample_trajectories(N, dt, S)                            
-    amb_trajs = amb.sample_trajectories(N, dt, S)                            
+    ped_trajs = ped.sample_trajectories(N, dt, S*100)                            
+    amb_trajs = amb.sample_trajectories(N, dt, S*100)                            
 
     # ── 3. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
@@ -79,7 +58,7 @@ def check_feasibility(client, agents, cfg):
         raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
     else:
         print(f"Installed solver: {cp.installed_solvers()}")
-        print(f"Selected solver: {solver}")
+        print(f"Selected solver: {solver}", end="\n\n")
 
     t0 = time.perf_counter()
 
@@ -145,7 +124,11 @@ def check_feasibility(client, agents, cfg):
                   if v.value is not None}
     delta_sum  = float(sum(delta_vals.values()))
     feasible   = delta_sum <= DELTA_TOL
-    print(f"delta_sum: {delta_sum}, feasible: {feasible}")
+    
+    print(f"delta_sum: {delta_sum}\n")
+    for k, v in delta_vals.items():
+        print(f"  {k:8s}: {v:.2f}")
+    print(f"\nfeasible: {feasible}")
 
     return {
         "status":          feasible,
