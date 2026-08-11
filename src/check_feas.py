@@ -81,6 +81,8 @@ def check_feasibility(client, agents, cfg):
         print(f"Installed solver: {cp.installed_solvers()}")
         print(f"Selected solver: {solver}")
 
+    t0 = time.perf_counter()
+
     x_var = cp.Variable((4, N+1), name="x")
     u_var = cp.Variable((2, N),   name="u")
     cons  = [x_var[:, 0] == ego_init]
