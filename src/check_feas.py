@@ -16,6 +16,8 @@ from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersect
 from src.utils import bicycle_to_carla, carla_to_bicycle
 from src.mpc_pareto import _ego_state, _build_nominal
 
+import gurobipy as gp
+
 
 DELTA_TOL = 1e-5
 _GRB_ENV = gp.Env(params={"OutputFlag": 0})
