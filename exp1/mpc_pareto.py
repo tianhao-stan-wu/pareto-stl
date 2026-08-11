@@ -6,8 +6,8 @@ import math
 import time
 
 from src.bicycle import KinematicBicycle
-from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
+from exp1.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane
 
 import gurobipy as gp
 

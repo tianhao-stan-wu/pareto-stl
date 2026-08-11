@@ -14,7 +14,7 @@ import cvxpy as cp
 from src.bicycle import KinematicBicycle
 from src.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
-from src.mpc_pareto import _ego_state, _build_nominal
+from exp1.mpc_pareto import _ego_state, _build_nominal
 
 import gurobipy as gp
 
@@ -100,7 +100,9 @@ def check_feasibility(client, agents, cfg):
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
         print(f"Feasibility checking status: [{prob.status}]", end=" ")
-        return None
+        return {
+        "status": False,
+    }
 
     a, beta = u_var.value[:, 0]
     control = bicycle_to_carla([a, beta],
