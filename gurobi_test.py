@@ -1,14 +1,7 @@
 import gurobipy as gp
 
-# Define your license keys directly in Python
-options = {
-    "WLSACCESSID": "your-wls-access-id",
-    "WLSSECRET": "your-wls-secret-key",
-    "LICENSEID": 1234567,  # Replace with your actual License ID
-}
-
 # 1. Initialize the Gurobi environment with your keys
-env = gp.Env(params=options)
+env = gp.Env()
 
 # 2. Pass that environment to your model
 m = gp.Model(env=env)

@@ -19,6 +19,7 @@ from src.utils import (
 )
 # from src.mpc import build_and_solve_mpc
 from src.mpc_pareto import solve_mpc_pareto
+from src.check_feas import check_feasibility
 
 
 def main():
@@ -122,7 +123,12 @@ def main():
                 v4.step(acc=-1, steer=0.5)
        
                 # result = build_and_solve_mpc(client, agents, cfg)
-                result = solve_mpc_pareto(client, agents, cfg)
+                result = check_feasibility(client, agents, cfg)
+
+                # if infeasible
+                if not result["status"]:
+                    result = solve_mpc_pareto(client, agents, cfg)
+
                 ego.apply_control(result["control"])
 
                 build_times.append(result["t_build"])
