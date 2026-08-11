@@ -5,6 +5,7 @@ import math
 import time
 import numpy as np
 import gurobipy as gp
+import cvxpy as cp
 
 try:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/CARLA_0.9.15/PythonAPI/carla")
