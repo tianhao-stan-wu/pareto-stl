@@ -278,7 +278,7 @@ def solve_mpc_pareto(client, agents, cfg):
                                    d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB, dt, _K_TAIL)
     r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
 
-    print(f"\nr_ped: {r_ped:.4f} \nr_amb: {r_amb:.4f} \nr_ego:{r_ego:.4f}")
+    print(f"\nr_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
