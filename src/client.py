@@ -18,6 +18,7 @@ class Client:
         self.client.set_timeout(self.cfg["timeout"])
 
         self.world = self.client.load_world(self.cfg["map"])
+        self.world.set_weather(carla.WeatherParameters.ClearNoon)
         self.original_settings = self.world.get_settings()
 
         self._apply_settings()

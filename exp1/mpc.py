@@ -7,7 +7,7 @@ import time
 
 from src.bicycle import KinematicBicycle
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
-from exp1.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane
+from exp1.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane, _promote
 
 import gurobipy as gp
 
@@ -33,18 +33,7 @@ _GRB_PARAMS = dict(
     Threads      = 4,      
     Seed         = 0,
 )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Physical constants
-# ─────────────────────────────────────────────────────────────────────────────
-_M_EGO, _M_PED, _M_AMB = 1850.0,  70.0, 4500.0
-_V_PED, _V_AMB, _V_EGO = 1.0,   0.1,    0.2
-_S_PED, _S_AMB         = 1000, 6000
-
-_BIG_M, _EPS_STRICT     =  500.0,  1e-3      
-_K_TAIL                 =    10              
-
+              
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
@@ -101,20 +90,6 @@ def _build_nominal(ego, model, dt, N, ego_init):
     return X_nom, U_nom, A_seq, B_seq, c_seq
 
 
-def _select_worst(ego_pos_nom, trajs, k) -> np.ndarray:
-    """
-    CVaR worst-k pre-selection.
-    Rank all S scenarios by their minimum L-inf distance to the nominal ego
-    position across the horizon; return the k closest (most dangerous) indices.
-
-    ego_pos_nom : (N+1, 2)
-    trajs       : (S, N+1, 2)
-    """
-    l_inf    = np.abs(trajs - ego_pos_nom[np.newaxis]).max(axis=2)  # (S, N+1)
-    min_dist = l_inf.min(axis=1)                                     # (S,)
-    return np.argsort(min_dist)[:k]
-
-
 def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
                   d_coll, mu, V_agent, V_ego, sev_scale, dt, S):
     """
@@ -139,74 +114,46 @@ def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
     return r_agent, r_ego
 
 
-def _encode_collision(x_var, trajs, r_per_z, margin_x, margin_y, label):
+def _encode_collision(x_var, trajs, d_safe, label, K_total=None):
     """
-    MILP encoding of empirical collision risk for one agent type.
+    MILP encoding of empirical collision probability for one agent group.
+    Uses the same square keep-out box (half-side d_safe) as the STL layer,
+    so "collision" means the same thing in both.
 
-    Per (n, k):
-      x-axis partition (exclusive, sum = 1):
-        s_x=1  iff  |dx| <= margin_x          (ego inside danger band)
-        p_pos=1 iff  dx  >= margin_x + eps    (ego safely right of agent)
-        p_neg=1 iff -dx  >= margin_x + eps    (ego safely left  of agent)
-      y-axis: symmetric with margin_y
-      z_nk[n,k] = s_x[n,k] AND s_y[n,k]      (collision at step k)
+        P = (1/K) * sum_n z_n,   z_n = 1 iff scenario n enters the box
 
-    Per n:
-      z_n[n] = OR_k z_nk[n,k]                 (any collision in scenario n)
-
-    Risk:
-      r_approx = sum_n  r_per_z[n] * z_n[n]  (scalar cp.Expression)
-
-    Returns z_n (cp.Variable K), r_approx (cp.Expression), constraints (list).
+    Per (n, k), four separation binaries each implying genuine clearance:
+        p_pos = 1  =>   dx >= d_safe
+        p_neg = 1  =>  -dx >= d_safe
+        q_pos = 1  =>   dy >= d_safe
+        q_neg = 1  =>  -dy >= d_safe
+    If none can be set, ego is inside the box, so z_n is forced on:
+        z_n >= 1 - (p_pos + p_neg + q_pos + q_neg)
     """
     K, T, _ = trajs.shape
-    M, e    = _BIG_M, _EPS_STRICT
+    denom   = float(K_total if K_total is not None else K)
+    M       = float(np.abs(trajs[:, :, :2]).ptp()) + d_safe + 1.0
 
-    # declare all binary variables upfront (avoids repeated cp.Variable calls)
-    s_x   = cp.Variable((K, T), boolean=True, name=f"sx_{label}")
     p_pos = cp.Variable((K, T), boolean=True, name=f"pp_{label}")
     p_neg = cp.Variable((K, T), boolean=True, name=f"pn_{label}")
-    s_y   = cp.Variable((K, T), boolean=True, name=f"sy_{label}")
     q_pos = cp.Variable((K, T), boolean=True, name=f"qp_{label}")
     q_neg = cp.Variable((K, T), boolean=True, name=f"qn_{label}")
-    z_nk  = cp.Variable((K, T), boolean=True, name=f"znk_{label}")
     z_n   = cp.Variable(K,      boolean=True, name=f"zn_{label}")
 
-    cons = []
-    for n in range(K):
-        px = trajs[n, :, 0].astype(float)   # (T,) precomputed agent positions
-        py = trajs[n, :, 1].astype(float)
+    PX = _promote(x_var[0, :T], K)          # (K, T)
+    PY = _promote(x_var[1, :T], K)
+    AX = trajs[:, :T, 0].astype(float)
+    AY = trajs[:, :T, 1].astype(float)
+    DX, DY = PX - AX, PY - AY
 
-        for k in range(T):
-            dx = x_var[0, k] - px[k]
-            dy = x_var[1, k] - py[k]
-
-            # x-axis exclusive partition + big-M region constraints
-            cons += [s_x[n,k] + p_pos[n,k] + p_neg[n,k] == 1,
-                      dx <=  margin_x     + M*(1 - s_x[n,k]),   # inside: right bound
-                     -dx <=  margin_x     + M*(1 - s_x[n,k]),   # inside: left bound
-                      dx >=  margin_x + e - M*(1 - p_pos[n,k]), # outside right
-                     -dx >=  margin_x + e - M*(1 - p_neg[n,k])] # outside left
-
-            # y-axis exclusive partition
-            cons += [s_y[n,k] + q_pos[n,k] + q_neg[n,k] == 1,
-                      dy <=  margin_y     + M*(1 - s_y[n,k]),
-                     -dy <=  margin_y     + M*(1 - s_y[n,k]),
-                      dy >=  margin_y + e - M*(1 - q_pos[n,k]),
-                     -dy >=  margin_y + e - M*(1 - q_neg[n,k])]
-
-            # AND gate: z_nk[n,k] = s_x[n,k] AND s_y[n,k]
-            cons += [z_nk[n,k] <= s_x[n,k],
-                     z_nk[n,k] <= s_y[n,k],
-                     z_nk[n,k] >= s_x[n,k] + s_y[n,k] - 1]
-
-        # OR gate over time: z_n[n] = any z_nk[n,k] over k=0..T-1
-        for k in range(T):
-            cons.append(z_nk[n, k] <= z_n[n])       # any hit forces z_n on
-        cons.append(cp.sum(z_nk[n, :]) >= z_n[n])   # z_n on only if some k hit
-
-    r_approx = cp.sum(cp.multiply(r_per_z, z_n))
-    return z_n, r_approx, cons
+    cons = [
+         DX >= d_safe - M * (1 - p_pos),
+        -DX >= d_safe - M * (1 - p_neg),
+         DY >= d_safe - M * (1 - q_pos),
+        -DY >= d_safe - M * (1 - q_neg),
+        cp.vstack([z_n for _ in range(T)]).T >= 1 - p_pos - p_neg - q_pos - q_neg,
+    ]
+    return z_n, cp.sum(z_n) / denom, cons
 
 
 def _pareto_filter(pts) -> np.ndarray:
@@ -227,7 +174,7 @@ def _pareto_filter(pts) -> np.ndarray:
 # Main function
 # ─────────────────────────────────────────────────────────────────────────────
 
-def solve_mpc_pareto(client, agents, cfg):
+def solve_mpc_pareto(client, agents, cfg, emergency):
     """
     Multi-objective MPC via epsilon-constraint method with MILP risk encoding.
 
@@ -242,7 +189,8 @@ def solve_mpc_pareto(client, agents, cfg):
 
     # ── 0. Config ─────────────────────────────────────────────────────────────
     T_sim   = cfg["mpc"]["horizon"]
-    S       = cfg["mpc"]["num_samples"]     # 100
+    S       = cfg["mpc"]["num_samples"]
+    P       = cfg["mpc"]["num_prob"]
     dt      = cfg["carla"]["dt"]
     N       = int(round(T_sim / dt))
     density = cfg["mpc"]["density"]
@@ -253,9 +201,6 @@ def solve_mpc_pareto(client, agents, cfg):
 
     ego, amb, ped = agents[0], agents[1], agents[2]
 
-    mu_ped = (_M_EGO * _M_PED) / (_M_EGO + _M_PED)
-    mu_amb = (_M_EGO * _M_AMB) / (_M_EGO + _M_AMB)
-
     # ── 1. Ego state + nominal trajectory ─────────────────────────────────────
     model    = KinematicBicycle(lr=ego.lr, dt=dt)
     ego_init = _ego_state(ego)
@@ -265,20 +210,12 @@ def solve_mpc_pareto(client, agents, cfg):
     ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           
                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
 
-    # ── 2. Sample 100 trajectories, select worst 5 per agent (CVaR alpha=0.95) ──
     ped_trajs = ped.sample_trajectories(N, dt, S)                            
-    amb_trajs = amb.sample_trajectories(N, dt, S)                            
-    ped_trajs = ped_trajs[_select_worst(ego_pos_nom, ped_trajs, _K_TAIL)]    
-    amb_trajs = amb_trajs[_select_worst(ego_pos_nom, amb_trajs, _K_TAIL)]    
+    amb_trajs = amb.sample_trajectories(N, dt, S)
 
-    # ── 3. Per-scenario risk weights (fixed scalars, computed on nominal traj) ──
-    r_ped, r_ego_p = _risk_weights(ego_pos_nom, ego_vel_nom, ped_trajs,
-                                   d_ped, mu_ped, _V_PED, _V_EGO, _S_PED, dt, _K_TAIL)
-    r_amb, r_ego_a = _risk_weights(ego_pos_nom, ego_vel_nom, amb_trajs,
-                                   d_amb, mu_amb, _V_AMB, _V_EGO, _S_AMB, dt, _K_TAIL)
-    r_ego = r_ego_p + r_ego_a   # (5,) combined ego risk per scenario index
+    ped_trajs_P = ped.sample_trajectories(N, dt, P)                            
+    amb_trajs_P = amb.sample_trajectories(N, dt, P)                            
 
-    print(f"\nr_ped: {r_ped} \nr_amb: {r_amb} \nr_ego:{r_ego}")
 
     # ── 4. Solver ─────────────────────────────────────────────────────────────
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
@@ -315,59 +252,55 @@ def solve_mpc_pareto(client, agents, cfg):
 
         # STL soft constraints (structural; shared across all solves)
         deltas = {}
-        c, d_ped_stl = safe_distance_walker(
-            x_var, ped_trajs.mean(axis=0), ego.width, ego.length, d_ped, label="ped")
-        cons += c
-        deltas["ped"] = d_ped_stl
+        if emergency:
+            c, d_ped_stl = safe_distance_walker(x_var, ped_trajs, d_ped, label="ped")
+            cons += c
+            cons += [d_ped_stl <= d_ped]
+            deltas["ped"] = d_ped_stl
 
-        c, d_amb_stl = safe_distance_vehicle(
-            x_var, amb_trajs.mean(axis=0), ego.width, ego.length,
-            amb.width, amb.length, d_amb, label="amb")
+        c, d_amb_stl = safe_distance_vehicle(x_var, amb_trajs, d_amb, label="amb")
         cons += c
+        cons += [d_ped_stl <= d_amb]
         deltas["amb"] = d_amb_stl
 
         c, d_lane = stay_in_lane(x_var, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
         cons += c 
+        # set max relaxation to 4 (approximate width of a lane) for realistic physical meaning
+        cons += [d_lane <= 4]
         deltas["lane"] = d_lane
 
-        c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
-        cons += c 
-        deltas["inter"] = d_int
+        # c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
+        # cons += c 
+        # deltas["inter"] = d_int
 
-        # MILP risk encoding
-        z_ped_var, r_ped_expr, c_ped = _encode_collision(
-            x_var, ped_trajs, r_ped, d_ped, d_ped, "ped")
-        z_amb_var, r_amb_expr, c_amb = _encode_collision(
-            x_var, amb_trajs, r_amb, d_amb, d_amb, "amb")
+        # MILP probability encoding
+        z_ped_var, p_ped_expr, c_ped = _encode_collision(x_var, ped_trajs_P, d_ped, "ped")
+        z_amb_var, p_amb_expr, c_amb = _encode_collision(x_var, amb_trajs_P, d_amb, "ped")
         cons += c_ped + c_amb
 
-        # z_any[n] = z_ped[n] OR z_amb[n]  -> ego risk indicator
-        z_any = cp.Variable(_K_TAIL, boolean=True, name="z_any")
-        for n in range(_K_TAIL):
-            cons += [z_any[n] >= z_ped_var[n],
-                     z_any[n] >= z_amb_var[n],
-                     z_any[n] <= z_ped_var[n] + z_amb_var[n]]
-        r_ego_expr = cp.sum(cp.multiply(r_ego, z_any))
+        # z_any[n] = z_ped[n] OR z_amb[n]. Only the forcing direction is needed;
+        # z_any is minimised / upper-bounded, so it never switches on spuriously.
+        z_any = cp.Variable(P, boolean=True, name="z_any")
+        cons += [z_any >= z_ped_var, z_any >= z_amb_var]
+        p_ego_expr = cp.sum(z_any) / float(P)
 
-        # epsilon constraints on non-minimised objectives
-        risk_exprs = {"ped": r_ped_expr, "ego": r_ego_expr, "amb": r_amb_expr}
+        risk_exprs = {"ped": p_ped_expr, "ego": p_ego_expr, "amb": p_amb_expr}
+
         for name, eps_val in eps_dict.items():
             cons.append(risk_exprs[name] <= float(eps_val))
 
-        W_BETA      = 5e-2    # steering magnitude
-        W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
-        W_STL       = 1e-2 
+        # W_BETA      = 5e-2    # steering magnitude
+        # W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
 
-        # L1 version — keeps the problem a pure MILP
-        s_beta = cp.Variable(N - 1, nonneg=True)
-        cons += [s_beta >=  cp.diff(u_var[1, :]),
-                 s_beta >= -cp.diff(u_var[1, :])]
-        smoothness = W_DBETA * cp.sum(s_beta) + W_BETA * cp.norm(u_var[1, :], 1)
+        # # L1 version — keeps the problem a pure MILP
+        # s_beta = cp.Variable(N - 1, nonneg=True)
+        # cons += [s_beta >=  cp.diff(u_var[1, :]),
+        #          s_beta >= -cp.diff(u_var[1, :])]
+        # smoothness = W_DBETA * cp.sum(s_beta) + W_BETA * cp.norm(u_var[1, :], 1)
 
         objective = cp.Minimize(
             risk_exprs[mode]
-            + W_STL * sum(deltas.values())
-            + smoothness
+            + cp.norm(u_var - U_nom.T, 1)
         )
 
         # minimise chosen risk; small delta penalty keeps STL slack tight

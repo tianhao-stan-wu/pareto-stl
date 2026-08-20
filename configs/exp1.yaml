@@ -1,7 +1,7 @@
 # params for initializing the experiment
 
 project:
-  name: "three-agent interaction"
+  name: "three-agent collision avoidance at intersection"
   seed: 42
   exp: "exp1"
 
@@ -18,8 +18,10 @@ carla:
 
 mpc:
   horizon: 2             
-  num_samples: 100        
-  sim_start: 5     
+  num_samples: 30
+  num_prob: 10        
+  sim_start: 4
+  emergency_start: 5     
   sim_end: 8
   type: "pareto"
   density: 1
@@ -74,6 +76,7 @@ ambulance:
   proximity_threshold: 5
 
 pedestrian:
+  blueprint: "walker.pedestrian.0001"
   spawn:
     location: {x: -22.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}

@@ -1,7 +1,7 @@
 # params for initializing the experiment
 
 project:
-  name: "multi-agent interaction"
+  name: "multi-agent collision avoidance at highway"
   seed: 42
   exp: "exp2"
 
@@ -9,17 +9,17 @@ carla:
   host: "localhost"
   port: 2000
   timeout: 10.0
-  map: "Town05"
+  map: "Town04"
   dt: 0.1 
   sync_mode: true
   spectator:
-    location: {x: 0.035, y: 4.962, z: 6.626}
-    rotation: {pitch: -21.737, yaw: 81.193, roll: 0.000}
+    location: {x: -200.503, y: 10.774, z: 20.530}
+    rotation: {pitch: -26.282, yaw: -178.128, roll: 0.000}
 
 mpc:
   horizon: 2             
   num_samples: 100        
-  sim_start: 5     
+  sim_start: 13    
   sim_end: 8
   type: "pareto"
   density: 1
@@ -31,15 +31,15 @@ stl:
 ego_vehicle:
   blueprint: "vehicle.tesla.model3"
   autopilot: True
-  draw_route: False
-  behavior: "normal"
-  target_speed: 40
+  draw_route: True
+  behavior: "aggressive"
+  target_speed: 60
   spawn:
-    location: {x: -45.214, y: 80.322, z: 0.5}
-    rotation: {pitch: -2.933, yaw: -87.606, roll: 0.000}
+    location: {x: -120.657, y: 5.447, z: 12.040}
+    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
   destination:
-    location: {x: -45.214, y: -3.398, z: 1}
-    rotation: {pitch: -3.156, yaw: -85.004, roll: 0.000}
+    location: {x: -280.862, y: 6.375, z: 3.150}
+    rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
   lr: 1.50            # dynamics params obtained from utils.py
   acc_min: -10
   acc_max: 6
@@ -49,86 +49,87 @@ ego_vehicle:
   length: 4.79 
   warmup: 0.5
 
-oncoming_v1:
+leader:
+  blueprint: "vehicle.dodge.charger_2020"
+  autopilot: True
+  draw_route: True
+  behavior: "normal"
+  target_speed: 60
+  spawn:
+    location: {x: -130.657, y: 5.447, z: 12.040}
+    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+  destination:
+    location: {x: -280.862, y: 6.375, z: 3.150}
+    rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+
+follower:
+  blueprint: "vehicle.audi.etron"
+  autopilot: True
+  draw_route: True
+  behavior: "normal"
+  target_speed: 60
+  spawn:
+    location: {x: -105.657, y: 5.447, z: 12.040}
+    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+  destination:
+    location: {x: -280.862, y: 6.375, z: 3.150}
+    rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+
+left_vehicle:
+  blueprint: "vehicle.mercedes.coupe_2020"
+  autopilot: True
+  draw_route: True
+  behavior: "normal"
+  target_speed: 60
+  spawn:
+    location: {x: -110.657, y: 8.447, z: 12.040}
+    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+  destination:
+    location: {x: -280.862, y: 8.375, z: 3.150}
+    rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+
+collision_v1:
   blueprint: "vehicle.nissan.patrol_2021"
-  autopilot: True
-  draw_route: False
-  behavior: "normal"
-  target_speed: 20
-  spawn:
-    location: {x: -48.752, y: 57.217, z: 1.398}
-    rotation: {pitch: -6.564, yaw: 87.010, roll: 0.000}
-  destination:
-    location: {x: -48.897, y: 107.022, z: 1.828}
-    rotation: {pitch: -0.680, yaw: 86.374, roll: 0.000}
-
-oncoming_v2:
-  blueprint: "vehicle.toyota.prius"
-  autopilot: True
-  draw_route: False
-  behavior: "normal"
-  target_speed: 35
-  spawn:
-    location: {x: -41.611, y: 44.949, z: 1.421}
-    rotation: {pitch: -1.377, yaw: -90.495, roll: 0.000}
-  destination:
-    location: {x: -45.654, y: 3.146, z: 2.324}
-    rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
-
-bus:
-  blueprint: "vehicle.mitsubishi.fusorosa"
   autopilot: True
   draw_route: False
   behavior: "normal"
   target_speed: 0
   spawn:
-    location: {x: -45.146, y: 90.043, z: 2.194}
-    rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
-  destination:
-    location: {x: -45.654, y: 3.146, z: 2.324}
-    rotation: {pitch: -6.836, yaw: -89.509, roll: 0.000}
+    location: {x: -255.862, y: 6.375, z: 3.150}
+    rotation: {pitch: -6.056, yaw: -175.498, roll: 0.000}
 
-outgoing_v1:
-  blueprint: "vehicle.audi.etron"
+collision_v2:
+  blueprint: "vehicle.toyota.prius"
   autopilot: True
   draw_route: False
   behavior: "normal"
-  target_speed: 30
+  target_speed: 0
   spawn:
-    location: {x: -70.496, y: 27.805, z: 2.039}
-    rotation: {pitch: -10.521, yaw: 3.820, roll: 0.000}
-  destination:
-    location: {x: -52.335, y: 95.889, z: 1.734}
-    rotation: {pitch: -10.821, yaw: 91.525, roll: 0.000}
-
-cyclist:
-  blueprint: "vehicle.bh.crossbike"
-  autopilot: True
-  draw_route: False
-  behavior: "normal"
-  target_speed: 30
-  spawn:
-    location: {x: -70.496, y: 27.805, z: 2.039}
-    rotation: {pitch: -10.521, yaw: 3.820, roll: 0.000}
-  destination:
-    location: {x: -52.335, y: 95.889, z: 1.734}
-    rotation: {pitch: -10.821, yaw: 91.525, roll: 0.000}
+    location: {x: -250.862, y: 6.375, z: 3.150}
+    rotation: {pitch: -6.056, yaw: -175.498, roll: 0.000}
 
 pedestrian1:
+  blueprint: "walker.pedestrian.0001"
   spawn:
-    location: {x: -22.011, y: 36.775, z: 1.640}
-    rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
+    location: {x: -253.862, y: 4.775, z: 3.150}
+    rotation: {pitch: -6.056, yaw: 0, roll: 0.000}
   mean_speed: 4
   std_speed: 1.5
   std_dir: 0.1
 
 pedestrian2:
+  blueprint: "walker.pedestrian.0002"
   spawn:
-    location: {x: -22.011, y: 36.775, z: 1.640}
-    rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
+    location: {x: -252.862, y: 4.775, z: 3.150}
+    rotation: {pitch: -6.056, yaw: -175.498, roll: 0.000}
   mean_speed: 4
   std_speed: 1.5
   std_dir: 0.1
+
+
+
+
+
 
 
 

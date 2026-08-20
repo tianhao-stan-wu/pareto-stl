@@ -345,6 +345,10 @@ def carla_to_bicycle(control, acc_min, acc_max, beta_min, beta_max):
     return a, beta
 
 
+# ------------------------------------------------------------------
+# other helper functions
+# ------------------------------------------------------------------
+
 def dist_2d(loc1, loc2):
     return math.sqrt((loc1.x - loc2.x)**2 + (loc1.y - loc2.y)**2)
 
@@ -363,6 +367,137 @@ def set_all_lights_green(world, green_time: float = 30.0):
         light.set_green_time(green_time)
         light.set_red_time(0.0)
         light.set_yellow_time(0.0)
+
+
+def print_and_draw_traffic_light_ids(world, duration=10.0, z_offset=2.0):
+    """
+    Print all traffic-light IDs and locations to the terminal,
+    and draw each ID above the corresponding traffic light in CARLA.
+
+    Args:
+        world: carla.World
+        duration: How long the ID label remains visible, in seconds.
+        z_offset: Height above the traffic light for the label.
+    """
+    traffic_lights = world.get_actors().filter("traffic.traffic_light*")
+
+    print(f"\nFound {len(traffic_lights)} traffic lights:")
+
+    for tl in traffic_lights:
+        loc = tl.get_location()
+
+        print(
+            f"ID: {tl.id:4d} | "
+            f"Location: "
+            f"({loc.x:.3f}, {loc.y:.3f}, {loc.z:.3f})"
+        )
+
+        # Draw ID above traffic light
+        label_loc = carla.Location(
+            x=loc.x,
+            y=loc.y,
+            z=loc.z + z_offset,
+        )
+
+        world.debug.draw_string(
+            label_loc,
+            str(tl.id),
+            draw_shadow=True,
+            color=carla.Color(255, 0, 0),
+            life_time=duration,
+            persistent_lines=False,
+        )
+
+    print(f"Traffic-light IDs drawn for {duration:.1f} seconds.\n")
+
+
+def set_traffic_lights_by_location(
+    world,
+    green_locations,
+    red_locations,
+    tolerance=5,
+    freeze=True,
+):
+    """
+    Find traffic lights by world location and set their states.
+
+    Args:
+        world: carla.World
+        green_locations: list of (x, y, z) tuples
+        red_locations: list of (x, y, z) tuples
+        tolerance: matching distance in meters
+        freeze: freeze traffic lights after setting the state
+
+    Returns:
+        dict with matched traffic-light IDs.
+    """
+
+    traffic_lights = world.get_actors().filter("traffic.traffic_light*")
+
+    def find_closest_light(target):
+        target_loc = carla.Location(*target)
+
+        best_tl = None
+        best_dist = float("inf")
+
+        for tl in traffic_lights:
+            dist = tl.get_location().distance(target_loc)
+
+            if dist < best_dist:
+                best_dist = dist
+                best_tl = tl
+
+        if best_tl is None or best_dist > tolerance:
+            return None
+
+        return best_tl
+
+    result = {
+        "green": [],
+        "red": [],
+    }
+
+    # Set green lights
+    for location in green_locations:
+        tl = find_closest_light(location)
+
+        if tl is None:
+            print(f"No traffic light found near {location}")
+            continue
+
+        if freeze:
+            tl.freeze(True)
+
+        tl.set_state(carla.TrafficLightState.Green)
+
+        result["green"].append(tl.id)
+
+        print(
+            f"GREEN: ID={tl.id}, "
+            f"location={tl.get_location()}"
+        )
+
+    # Set red lights
+    for location in red_locations:
+        tl = find_closest_light(location)
+
+        if tl is None:
+            print(f"No traffic light found near {location}")
+            continue
+
+        if freeze:
+            tl.freeze(True)
+
+        tl.set_state(carla.TrafficLightState.Red)
+
+        result["red"].append(tl.id)
+
+        print(
+            f"RED: ID={tl.id}, "
+            f"location={tl.get_location()}"
+        )
+
+    return result
 
 
 def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
@@ -450,9 +585,6 @@ def draw_rectangle_boundary(
                     color=color,
                     life_time=life_time)
 
-# ------------------------------------------------------------------
-# carla world (callable in main)
-# ------------------------------------------------------------------
 
 def get_spectator_transform(world):
     """Print spectator transform in YAML-ready format."""
@@ -561,6 +693,7 @@ def main():
     parser.add_argument("--log_dir", type=str, help="path to logs folder")
     parser.add_argument("--fps", type=int, default=10)
     parser.add_argument("-v", action="store_true", help="save video")
+    parser.add_argument("-tl", action="store_true", help="draw traffic light id in simuator")
 
     args = parser.parse_args()
 
@@ -595,6 +728,9 @@ def main():
 
     if args.v:
         imgs_to_video(args.log_dir, args.fps)
+
+    if args.tl:
+        print_and_draw_traffic_light_ids(world, duration=120)
 
 
 if __name__ == '__main__':

@@ -21,12 +21,12 @@ import gurobipy as gp
 
 DELTA_TOL = 1e-5
 
-def check_feasibility(client, agents, cfg):
+def check_feasibility(client, agents, cfg, emergency):
     """
     Solve the STL-feasibility MILP for the current tick.
     """
     T_sim   = cfg["mpc"]["horizon"]
-    S       = cfg["mpc"]["num_samples"]     # 100
+    S       = cfg["mpc"]["num_samples"]   
     dt      = cfg["carla"]["dt"]
     N       = int(round(T_sim / dt))
     density = cfg["mpc"]["density"]
@@ -46,9 +46,8 @@ def check_feasibility(client, agents, cfg):
     ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           
                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
 
-    # ── 2. Sample 100 trajectories
-    ped_trajs = ped.sample_trajectories(N, dt, S*10)                            
-    amb_trajs = amb.sample_trajectories(N, dt, S*10)                                
+    ped_trajs = ped.sample_trajectories(N, dt, S)                            
+    amb_trajs = amb.sample_trajectories(N, dt, S)                                
 
     t0 = time.perf_counter()
 
@@ -64,30 +63,33 @@ def check_feasibility(client, agents, cfg):
 
     # STL soft constraints (structural; shared across all solves)
     deltas = {}
-    c, d_ped_stl = safe_distance_walker(
-        x_var, ped_trajs.mean(axis=0), ego.width, ego.length, d_ped, label="ped")
-    cons += c
-    deltas["ped"] = d_ped_stl
+    if emergency:
+        c, d_ped_stl = safe_distance_walker(x_var, ped_trajs, d_ped, label="ped")
+        cons += c
+        cons += [d_ped_stl <= 0]
+        deltas["ped"] = d_ped_stl
 
-    c, d_amb_stl = safe_distance_vehicle(
-        x_var, amb_trajs.mean(axis=0), ego.width, ego.length,
-        amb.width, amb.length, d_amb, label="amb")
+    c, d_amb_stl = safe_distance_vehicle(x_var, amb_trajs, d_amb, label="amb")
     cons += c
+    cons += [d_amb_stl <= 0]
     deltas["amb"] = d_amb_stl
 
     c, d_lane = stay_in_lane(x_var, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
     cons += c 
+    cons += [d_lane <= 0]
     deltas["lane"] = d_lane
 
-    c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
-    cons += c 
-    deltas["inter"] = d_int
+    # c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
+    # cons += c 
+    # deltas["inter"] = d_int
 
-    objective = cp.Minimize(sum(deltas.values()))
+    # objective = cp.Minimize(sum(deltas.values()))
+    objective = cp.Minimize(cp.norm(u_var - U_nom.T, 1)+ cp.norm(x_var - X_nom.T, 1))
     prob = cp.Problem(objective, cons)
 
     n_cons  = sum(c.size for c in cons)
     n_vars  = sum(v.size for v in prob.variables())
+
     t_build = time.perf_counter() - t0
 
     t1 = time.perf_counter()
@@ -99,7 +101,7 @@ def check_feasibility(client, agents, cfg):
     print(f"t_solve: {t_solve:.3f}, n_cons: {n_cons}, n_vars: {n_vars}")
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-        print(f"Feasibility checking status: [{prob.status}]", end=" ")
+        print(f"The MPC-STL problem is infeasible: [{prob.status}]")
         return {
         "status": False,
     }
@@ -112,19 +114,17 @@ def check_feasibility(client, agents, cfg):
     delta_vals = {k: float(v.value) for k, v in deltas.items()
                   if v.value is not None}
     delta_sum  = float(sum(delta_vals.values()))
-    feasible   = delta_sum <= DELTA_TOL
     
     print(f"delta_sum: {delta_sum:.2f}\n")
     for k, v in delta_vals.items():
         print(f"  {k:8s}: {v:.2f}")
-    print(f"\nfeasible: {feasible}")
+    print(f"The MPC-STL problem is feasible: [{prob.status}]", end=" ")
 
-    if feasible:
-        draw_sample_traj(client.world, x_var.value[:2, :].T,
+    draw_sample_traj(client.world, x_var.value[:2, :].T,
                      color=COLORS["blue"],  life_time=lt)
 
     return {
-        "status":          feasible,
+        "status":          True,
         "control":         control,
         "deltas":          deltas,
         "t_build":         t_build,

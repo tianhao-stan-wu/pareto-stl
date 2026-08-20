@@ -24,11 +24,19 @@ class Vehicle:
             self.agent = BehaviorAgent(
                 self.actor, behavior=self.cfg.get("behavior", "normal")
             )
+
             if "destination" in self.cfg:
                 self._set_destination()
-            self.agent.set_target_speed(self.cfg.get("target_speed", 30))
-            if self.cfg.get("draw_route", False):
-                self.draw_route()
+
+            if "target_speed" in self.cfg:
+
+                speed = self.cfg.get("target_speed", 30)
+                self.agent.max_speed = speed
+                self.agent.set_target_speed(speed)
+
+        if self.cfg.get("draw_route", False):
+            self.draw_route()
+
 
     # ------------------------------------------------------------------
     # Spawn & setup
@@ -69,6 +77,22 @@ class Vehicle:
     def _set_destination(self):
         loc = self.cfg["destination"]["location"]
         self.agent.set_destination(carla.Location(x=loc["x"], y=loc["y"], z=loc["z"]))
+
+    def _set_start_speed(self, speed: float):
+        """Instantly set vehicle speed (km/h) along its current forward direction."""
+        speed_mps = speed / 3.6
+
+        print(f"setting agent {self.key} start speed: {speed}")
+
+        forward = self.actor.get_transform().get_forward_vector()
+
+        self.actor.set_target_velocity(
+            carla.Vector3D(
+                x=forward.x * speed_mps,
+                y=forward.y * speed_mps,
+                z=forward.z * speed_mps,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Control
@@ -270,10 +294,10 @@ class Walker:
         self.std_dir = self.cfg.get("std_dir", 0.05)
 
     def _spawn(self):
-        bp = self.world.get_blueprint_library().find(
-            self.cfg.get("blueprint", "walker.pedestrian.0001")
-        )
-        self.actor = self.world.try_spawn_actor(bp, self._get_transform("spawn"))
+        blueprint = self.world.get_blueprint_library().find(self.cfg["blueprint"])
+        if blueprint is None:
+            raise ValueError(f"Blueprint '{self.cfg['blueprint']}' not found.")
+        self.actor = self.world.try_spawn_actor(blueprint, self._get_transform("spawn"))
         if self.actor is None:
             raise RuntimeError(f"Failed to spawn walker at {self.cfg['spawn']}.")
 

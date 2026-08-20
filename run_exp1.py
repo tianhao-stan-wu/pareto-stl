@@ -57,6 +57,7 @@ def main():
     dt = cfg["carla"]["dt"]
     start_tick = int(cfg["mpc"]["sim_start"] / dt)
     end_tick = int(cfg["mpc"]["sim_end"] / dt)
+    emergency_tick = int(cfg["mpc"]["emergency_start"] / dt)
 
     ego_warmup = cfg["ego_vehicle"]["warmup"]
     amb_warmup = cfg["ambulance"]["warmup"]
@@ -86,12 +87,6 @@ def main():
 
             client.tick()
 
-            # speed_kmh = ego.get_speed()
-            # print(f"Ego Speed: {speed_kmh:.2f} km/h")
-
-            # speed_kmh = amb.get_speed()
-            # print(f"Amb Speed: {speed_kmh:.2f} km/h")
-
             # save carla image
             if tick == camera_tick:
                 camera.listen(img_queue.put)
@@ -109,20 +104,9 @@ def main():
                 v1.step()
                 v2.step()
                 v3.step(acc=0.1, steer=0.5)
-                v4.step(acc=0.15, steer=0.5)
+                v4.step(acc=0.1, steer=0.5)
 
-            # elif tick <= end_tick:
-
-            #     ego.step()      
-            #     amb.random_step()
-            #     ped.random_step()
-
-            #     v1.step()
-            #     v2.step()
-            #     v3.step(acc=-1, steer=0.5)
-            #     v4.step(acc=-1, steer=0.5)
-
-            elif tick <= end_tick:
+            elif tick < end_tick:
 
                 amb.random_step()
                 ped.random_step()
@@ -131,13 +115,14 @@ def main():
                 v2.step()
                 v3.step(acc=-1, steer=0.5)
                 v4.step(acc=-1, steer=0.5)
+
+                emergency = tick >= emergency_tick
        
-                # result = build_and_solve_mpc(client, agents, cfg)
-                result = check_feasibility(client, agents, cfg)
+                result = check_feasibility(client, agents, cfg, emergency=emergency)
 
                 # if infeasible
                 if not result["status"]:
-                    result = solve_mpc_pareto(client, agents, cfg)
+                    result = solve_mpc_pareto(client, agents, cfg, emergency=emergency)
 
                 ego.apply_control(result["control"])
 

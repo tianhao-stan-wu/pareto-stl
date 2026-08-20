@@ -17,7 +17,7 @@ from src.client import Client
 from src.agents import Vehicle, Walker
 from src.utils import (
     set_all_lights_green, setup_logging, setup_camera, save_frame, 
-    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
+    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness, set_traffic_lights_by_location
 )
 
 # from exp2.mpc import solve_mpc_pareto
@@ -28,7 +28,7 @@ def main():
 
     # init
     cfg = load_config(exp="exp2")
-    log_dir, img_dir = setup_logging(cfg)
+    # log_dir, img_dir = setup_logging(cfg)
     
     seed = cfg["project"]["seed"]
     random.seed(seed)
@@ -38,23 +38,33 @@ def main():
 
     client = Client(cfg)
     # camera, img_queue = setup_camera(client.world, cfg["carla"])
-    
-    # set traffic light green
 
-    # # spawn agents
+    # spawn agents
     ego = Vehicle(client.world, cfg, "ego_vehicle")
+
+    leader = Vehicle(client.world, cfg, "leader")
+    follower = Vehicle(client.world, cfg, "follower")
+    left = Vehicle(client.world, cfg, "left_vehicle")
     
-    agents = [ego,]
+    col1 = Vehicle(client.world, cfg, "collision_v1")
+    col2 = Vehicle(client.world, cfg, "collision_v2")
 
-    v1 = Vehicle(client.world, cfg, "v1")
-    v2 = Vehicle(client.world, cfg, "v2")
-    v3 = Vehicle(client.world, cfg, "v3")
-    v4 = Vehicle(client.world, cfg, "v4")
+    ped1 = Walker(client.world, cfg, "pedestrian1")
+    ped2 = Walker(client.world, cfg, "pedestrian2")
 
-    # # setup
-    # dt = cfg["carla"]["dt"]
-    # start_tick = int(cfg["mpc"]["sim_start"] / dt)
-    # end_tick = int(cfg["mpc"]["sim_end"] / dt)
+
+    # bus = Vehicle(client.world, cfg, "bus")
+    # out1 = Vehicle(client.world, cfg, "outgoing_v1")
+    # cyc = Vehicle(client.world, cfg, "cyclist")
+
+    
+
+    # agents = [ego,]
+
+    # setup
+    dt = cfg["carla"]["dt"]
+    start_tick = int(cfg["mpc"]["sim_start"] / dt)
+    end_tick = int(cfg["mpc"]["sim_end"] / dt)
 
     # ego_warmup = cfg["ego_vehicle"]["warmup"]
     # amb_warmup = cfg["ambulance"]["warmup"]
@@ -66,7 +76,7 @@ def main():
     # num_constraints = None
     # num_variables = None
 
-    # tick = 0
+    tick = 0
     # camera_tick = start_tick
 
     # solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
@@ -79,84 +89,84 @@ def main():
 
     try:
         while True:
-            break
-
-
-            # print(f"tick: {tick} \n")
-
-            # client.tick()
-
-    #         # speed_kmh = ego.get_speed()
-    #         # print(f"Ego Speed: {speed_kmh:.2f} km/h")
-
-    #         # speed_kmh = amb.get_speed()
-    #         # print(f"Amb Speed: {speed_kmh:.2f} km/h")
-
-    #         # save carla image
-    #         if tick == camera_tick:
-    #             camera.listen(img_queue.put)
-
-    #         if tick > camera_tick:
-    #             save_frame(img_queue, img_dir, tick - camera_tick)
             
-    #         # control step
-    #         if tick < start_tick:
+            if tick == 10000:
+                break 
 
-    #             ego.step(acc=ego_warmup)
-    #             amb.step(acc=amb_warmup)
-    #             ped.step()
+            print(f"tick: {tick} \n")
 
-    #             v1.step()
-    #             v2.step()
-    #             v3.step(acc=0.1, steer=0.5)
-    #             v4.step(acc=0.15, steer=0.5)
+            client.tick()
 
-    #         # elif tick <= end_tick:
+            # # save carla image
+            # if tick == camera_tick:
+            #     camera.listen(img_queue.put)
 
-    #         #     ego.step()      
-    #         #     amb.random_step()
-    #         #     ped.random_step()
+            # if tick > camera_tick:
+            #     save_frame(img_queue, img_dir, tick - camera_tick)
+            
+            # control step
+            if tick < start_tick:
 
-    #         #     v1.step()
-    #         #     v2.step()
-    #         #     v3.step(acc=-1, steer=0.5)
-    #         #     v4.step(acc=-1, steer=0.5)
+                ego.step()
+                print("current speed:", ego.get_speed())
 
-    #         elif tick <= end_tick:
+                leader.step()
+                follower.step()
+                left.step()
 
-    #             amb.random_step()
-    #             ped.random_step()
+                col1.step(acc=-1)
+                col2.step(acc=-1)
 
-    #             v1.step()
-    #             v2.step()
-    #             v3.step(acc=-1, steer=0.5)
-    #             v4.step(acc=-1, steer=0.5)
-       
-    #             # result = build_and_solve_mpc(client, agents, cfg)
-    #             result = check_feasibility(client, agents, cfg)
 
-    #             # if infeasible
-    #             if not result["status"]:
-    #                 result = solve_mpc_pareto(client, agents, cfg)
-
-    #             ego.apply_control(result["control"])
-
-    #             build_times.append(result["t_build"])
-    #             solve_times.append(result["t_solve"])
+             
                
-    #             if num_constraints is None:
-    #                 num_constraints = result["num_constraints"]
-    #                 num_variables = result["num_variables"]
 
-    #             for agent in agents:
-    #                 loc = agent.get_transform().location
-    #                 agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
+            # elif tick <= end_tick:
 
-    #         else:
-    #             print("End of simulation")
-    #             break
+            #     ego.step()      
+            #     amb.random_step()
+            #     ped.random_step()
 
-    #         tick += 1
+            #     v1.step()
+            #     v2.step()
+            #     v3.step(acc=-1, steer=0.5)
+            #     v4.step(acc=-1, steer=0.5)
+
+            # elif tick <= end_tick:
+
+            #     amb.random_step()
+            #     ped.random_step()
+
+            #     v1.step()
+            #     v2.step()
+            #     v3.step(acc=-1, steer=0.5)
+            #     v4.step(acc=-1, steer=0.5)
+       
+            #     # result = build_and_solve_mpc(client, agents, cfg)
+            #     result = check_feasibility(client, agents, cfg)
+
+            #     # if infeasible
+            #     if not result["status"]:
+            #         result = solve_mpc_pareto(client, agents, cfg)
+
+            #     ego.apply_control(result["control"])
+
+            #     build_times.append(result["t_build"])
+            #     solve_times.append(result["t_solve"])
+               
+            #     if num_constraints is None:
+            #         num_constraints = result["num_constraints"]
+            #         num_variables = result["num_variables"]
+
+            #     for agent in agents:
+            #         loc = agent.get_transform().location
+            #         agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
+
+            # else:
+            #     print("End of simulation")
+            #     break
+
+            tick += 1
 
     finally:
         
