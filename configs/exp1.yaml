@@ -19,7 +19,7 @@ carla:
 mpc:
   horizon: 2             
   num_samples: 30
-  num_prob: 10        
+  num_prob: 30        
   sim_start: 4
   emergency_start: 5     
   sim_end: 8

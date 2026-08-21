@@ -1,167 +1,482 @@
+# import itertools
+# import carla
+# import numpy as np
+# import cvxpy as cp
+# import math
+# import time
+
+# from src.bicycle import KinematicBicycle
+# from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
+# from exp1.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane, _promote
+
+# import gurobipy as gp
+
+# # module-level, created once
+# _GRB_ENV = gp.Env(params={"OutputFlag": 0})
+
+# _GRB_PARAMS = dict(
+#     # termination
+#     TimeLimit    = 10.0,   
+#     MIPGap       = 0.0,    
+
+#     # big-M numerics
+#     IntFeasTol   = 1e-7,   
+#     NumericFocus = 2,      
+#     Presolve     = 2,      
+
+#     # search strategy
+#     MIPFocus     = 1,      
+#     Heuristics   = 0.1,    
+#     Cuts         = 2,      
+
+#     # determinism for reproducibility
+#     Threads      = 4,      
+#     Seed         = 0,
+# )
+              
+
+# # ─────────────────────────────────────────────────────────────────────────────
+# # Helper functions
+# # ─────────────────────────────────────────────────────────────────────────────
+
+# def _ego_state(ego) -> np.ndarray:
+#     """Return ego state [px, py, theta_rad, speed_mps]."""
+#     tf  = ego.get_transform()
+#     vel = ego.get_velocity()
+#     return np.array([tf.location.x, tf.location.y,
+#                      math.radians(tf.rotation.yaw),
+#                      math.sqrt(vel.x**2 + vel.y**2)])
+
+
+# def _build_nominal(ego, model, dt, N, ego_init):
+#     """
+#     Derive U_nom from the autopilot waypoint plan, roll out X_nom,
+#     and linearise the bicycle dynamics at each step.
+#     Returns X_nom (N+1,4), U_nom (N,2), A_seq, B_seq, c_seq.
+#     """
+#     ctrl         = ego.agent.run_step()
+#     a_nom, b_nom = carla_to_bicycle(ctrl, ego.acc_min, ego.acc_max,
+#                                     ego.beta_min, ego.beta_max)
+#     plan = list(ego.agent.get_local_planner().get_plan())
+
+#     U_nom = np.zeros((N, 2))
+#     for k in range(N):
+#         if k < len(plan) - 1:
+#             wp_c  = plan[k][0].transform
+#             wp_n  = plan[k+1][0].transform
+#             yaw_n = math.atan2(wp_n.location.y - wp_c.location.y,
+#                                wp_n.location.x - wp_c.location.x)
+#             if k == 0:
+#                 dyaw = yaw_n - ego_init[2]
+#             else:
+#                 wp_p  = plan[k-1][0].transform
+#                 yaw_p = math.atan2(wp_c.location.y - wp_p.location.y,
+#                                    wp_c.location.x - wp_p.location.x)
+#                 dyaw  = yaw_n - yaw_p
+#             v_est    = max(ego_init[3] + a_nom * k * dt, 0.5)
+#             beta_k   = np.clip(dyaw * ego.lr / (v_est * dt), ego.beta_min, ego.beta_max)
+#             U_nom[k] = [a_nom, 0]
+#         else:
+#             U_nom[k] = [a_nom, 0]
+
+#     X_nom = np.zeros((N+1, 4));  X_nom[0] = ego_init.copy()
+#     A_seq, B_seq, c_seq = [], [], []
+#     for k in range(N):
+#         A_k, B_k    = model.linearize(X_nom[k], U_nom[k])
+#         X_nom[k+1]  = model.step(X_nom[k], U_nom[k])
+#         c_k         = X_nom[k+1] - A_k @ X_nom[k] - B_k @ U_nom[k]
+#         A_seq.append(A_k);  B_seq.append(B_k);  c_seq.append(c_k)
+
+#     return X_nom, U_nom, A_seq, B_seq, c_seq
+
+
+# def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
+#                   d_coll, mu, V_agent, V_ego, sev_scale, dt, S):
+#     """
+#     Compute fixed per-scenario risk weights from the *nominal* ego trajectory.
+#     Severity = mu * ||v_ego - v_agent|| / sev_scale.
+#     Divided by K so that sum(r_agent) approximates E[risk] over the tail.
+
+#     Returns r_agent (K,), r_ego (K,).
+#     """
+#     K = trajs.shape[0]
+#     r_agent, r_ego = np.zeros(K), np.zeros(K)
+#     for n in range(K):
+#         pos  = trajs[n, :, :2]
+#         hits = np.where(np.linalg.norm(ego_pos_nom - pos, axis=1) <= d_coll)[0]
+#         if hits.size == 0:
+#             continue
+#         t       = hits[0]
+#         v_agent = (pos[t] - pos[t-1]) / dt if t > 0 else np.zeros(2)
+#         sev     = mu * np.linalg.norm(ego_vel_nom[t] - v_agent) / sev_scale
+#         r_agent[n] = sev * V_agent / S
+#         r_ego[n]   = sev * V_ego   / S
+#     return r_agent, r_ego
+
+
+# def _encode_collision(x_var, trajs, d_safe, label, K_total=None):
+#     """
+#     MILP encoding of empirical collision probability for one agent group.
+#     Uses the same square keep-out box (half-side d_safe) as the STL layer,
+#     so "collision" means the same thing in both.
+
+#         P = (1/K) * sum_n z_n,   z_n = 1 iff scenario n enters the box
+
+#     Per (n, k), four separation binaries each implying genuine clearance:
+#         p_pos = 1  =>   dx >= d_safe
+#         p_neg = 1  =>  -dx >= d_safe
+#         q_pos = 1  =>   dy >= d_safe
+#         q_neg = 1  =>  -dy >= d_safe
+#     If none can be set, ego is inside the box, so z_n is forced on:
+#         z_n >= 1 - (p_pos + p_neg + q_pos + q_neg)
+#     """
+#     K, T, _ = trajs.shape
+#     denom   = float(K_total if K_total is not None else K)
+#     M       = float(np.abs(trajs[:, :, :2]).ptp()) + d_safe + 1.0
+
+#     p_pos = cp.Variable((K, T), boolean=True, name=f"pp_{label}")
+#     p_neg = cp.Variable((K, T), boolean=True, name=f"pn_{label}")
+#     q_pos = cp.Variable((K, T), boolean=True, name=f"qp_{label}")
+#     q_neg = cp.Variable((K, T), boolean=True, name=f"qn_{label}")
+#     z_n   = cp.Variable(K,      boolean=True, name=f"zn_{label}")
+
+#     PX = _promote(x_var[0, :T], K)          # (K, T)
+#     PY = _promote(x_var[1, :T], K)
+#     AX = trajs[:, :T, 0].astype(float)
+#     AY = trajs[:, :T, 1].astype(float)
+#     DX, DY = PX - AX, PY - AY
+
+#     cons = [
+#          DX >= d_safe - M * (1 - p_pos),
+#         -DX >= d_safe - M * (1 - p_neg),
+#          DY >= d_safe - M * (1 - q_pos),
+#         -DY >= d_safe - M * (1 - q_neg),
+#         cp.vstack([z_n for _ in range(T)]).T >= 1 - p_pos - p_neg - q_pos - q_neg,
+#     ]
+#     return z_n, cp.sum(z_n) / denom, cons
+
+
+# def _pareto_filter(pts) -> np.ndarray:
+#     """
+#     Return boolean mask of non-dominated rows in pts (M, 3).
+#     Row i is dominated iff some row j has all values <= and at least one <.
+#     """
+#     n, mask = len(pts), np.ones(len(pts), dtype=bool)
+#     for i in range(n):
+#         for j in range(n):
+#             if i != j and np.all(pts[j] <= pts[i]) and np.any(pts[j] < pts[i]):
+#                 mask[i] = False
+#                 break
+#     return mask
+
+
+# def solve_mpc_pareto(client, agents, cfg, emergency):
+
+#     # ── 0. Config ─────────────────────────────────────────────────────────────
+#     T_sim   = cfg["mpc"]["horizon"]
+#     S       = cfg["mpc"]["num_samples"]
+#     P       = cfg["mpc"]["num_prob"]
+#     dt      = cfg["carla"]["dt"]
+#     N       = int(round(T_sim / dt))
+#     density = cfg["mpc"]["density"]
+#     lt      = dt * 1.5
+
+#     d_ped   = float(cfg["stl"]["pedestrian"])
+#     d_amb   = float(cfg["stl"]["ambulance"])
+
+#     ego, amb, ped = agents[0], agents[1], agents[2]
+
+#     # ── 1. Ego state + nominal trajectory ─────────────────────────────────────
+#     model    = KinematicBicycle(lr=ego.lr, dt=dt)
+#     ego_init = _ego_state(ego)
+#     X_nom, U_nom, A_seq, B_seq, c_seq = _build_nominal(ego, model, dt, N, ego_init)
+
+#     ego_pos_nom = X_nom[:, :2]                                       
+#     ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           
+#                             X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
+
+#     ped_trajs = ped.sample_trajectories(N, dt, S)                            
+#     amb_trajs = amb.sample_trajectories(N, dt, S)
+
+#     ped_trajs_P = ped.sample_trajectories(N, dt, P)                            
+#     amb_trajs_P = amb.sample_trajectories(N, dt, P)                            
+
+
+#     # ── 4. Solver ─────────────────────────────────────────────────────────────
+#     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
+#                    if s in cp.installed_solvers()), None)
+        
+#     # ── 5. Epsilon grid: density points in (0, 1] per axis ───────────────────
+#     eps_grid = np.linspace(0, 100, density + 1)[1:]   # e.g. [0.5, 1.0] for density=2
+
+#     # each mode frees its own epsilon; the other two axes form the grid
+#     _free_axes = {"ped": ["ego", "amb"],
+#                   "ego": ["ped", "amb"],
+#                   "amb": ["ped", "ego"]}
+
+#     # ── 6. Single MPC solve ───────────────────────────────────────────────────
+#     def _solve_one(mode, eps_dict, warm=None):
+#         """
+#         Build and solve one epsilon-constraint MILP.
+
+#         mode     : "ped" | "ego" | "amb"   objective to minimise
+#         eps_dict : {name: value} upper bounds on the other two risk objectives
+#         Returns result dict, or None if infeasible.
+#         """
+#         t0 = time.perf_counter()
+
+#         x_var = cp.Variable((4, N+1), name="x")
+#         u_var = cp.Variable((2, N),   name="u")
+#         cons  = [x_var[:, 0] == ego_init]
+
+#         # linearised dynamics + control bounds (identical for every solve)
+#         for k in range(N):
+#             cons += [x_var[:,k+1] == A_seq[k]@x_var[:,k] + B_seq[k]@u_var[:,k] + c_seq[k],
+#                      u_var[0,k] >= ego.acc_min,  u_var[0,k] <= ego.acc_max,
+#                      u_var[1,k] >= ego.beta_min, u_var[1,k] <= ego.beta_max]
+
+#         # STL soft constraints (structural; shared across all solves)
+#         deltas = {}
+#         if emergency:
+#             c, d_ped_stl = safe_distance_walker(x_var, ped_trajs, d_ped, label="ped")
+#             cons += c
+#             # cons += [d_ped_stl <= d_ped]
+#             deltas["ped"] = d_ped_stl
+
+#         c, d_amb_stl = safe_distance_vehicle(x_var, amb_trajs, d_amb, label="amb")
+#         cons += c
+#         # cons += [d_ped_stl <= d_amb]
+#         deltas["amb"] = d_amb_stl
+
+#         c, d_lane = stay_in_lane(x_var, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
+#         cons += c 
+#         # cons += [d_lane <= 4]
+#         deltas["lane"] = d_lane
+
+#         # c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
+#         # cons += c 
+#         # deltas["inter"] = d_int
+
+#         # MILP probability encoding
+#         z_ped_var, p_ped_expr, c_ped = _encode_collision(x_var, ped_trajs_P, d_ped, "ped")
+#         z_amb_var, p_amb_expr, c_amb = _encode_collision(x_var, amb_trajs_P, d_amb, "ped")
+#         cons += c_ped + c_amb
+
+#         # z_any[n] = z_ped[n] OR z_amb[n]. Only the forcing direction is needed;
+#         # z_any is minimised / upper-bounded, so it never switches on spuriously.
+#         z_any = cp.Variable(P, boolean=True, name="z_any")
+#         cons += [z_any >= z_ped_var, z_any >= z_amb_var]
+#         p_ego_expr = cp.sum(z_any) / float(P)
+
+#         risk_exprs = {"ped": p_ped_expr, "ego": p_ego_expr, "amb": p_amb_expr}
+
+#         for name, eps_val in eps_dict.items():
+#             cons.append(risk_exprs[name] <= float(eps_val))
+
+#         # W_BETA      = 5e-2    # steering magnitude
+#         # W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
+
+#         # # L1 version — keeps the problem a pure MILP
+#         # s_beta = cp.Variable(N - 1, nonneg=True)
+#         # cons += [s_beta >=  cp.diff(u_var[1, :]),
+#         #          s_beta >= -cp.diff(u_var[1, :])]
+#         # smoothness = W_DBETA * cp.sum(s_beta) + W_BETA * cp.norm(u_var[1, :], 1)
+
+#         objective = cp.Minimize(
+#             risk_exprs[mode]
+#         )
+
+#         # minimise chosen risk; small delta penalty keeps STL slack tight
+#         # objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
+#         # objective = cp.Minimize(sum(deltas.values()))
+#         prob = cp.Problem(objective, cons)
+
+#         n_cons  = sum(c.size for c in cons)
+#         n_vars  = sum(v.size for v in prob.variables())
+#         t_build = time.perf_counter() - t0
+
+#         t1 = time.perf_counter()
+
+#         if warm is not None:
+#             x_var.value = warm["x_opt"]        # cvxpy passes these as MIP start
+#             u_var.value = warm["u_opt"]
+#             prob.solve(solver=cp.GUROBI, env=_GRB_ENV, warm_start=True, **_GRB_PARAMS)
+#         else:
+#             prob.solve(solver=cp.GUROBI, env=_GRB_ENV, **_GRB_PARAMS)
+
+#         t_solve = time.perf_counter() - t1
+#         print(f"t_solve: {t_solve:.3f}, n_cons: {n_cons}, n_vars: {n_vars}")
+
+#         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+#             print(f"[{prob.status}]", end=" ")
+#             return None
+
+#         return {
+#             "mode":            mode,
+#             "x_opt":           x_var.value,
+#             "u_opt":           u_var.value,
+#             "deltas":          {k: float(v.value) for k, v in deltas.items()
+#                                 if v.value is not None},
+#             "t_build":         t_build,
+#             "t_solve":         t_solve,
+#             "num_constraints": n_cons,
+#             "num_variables":   n_vars,
+#         }
+
+#     # ── 7. Epsilon-constraint sweep ───────────────────────────────────────────
+#     results = []
+#     for mode, axes in _free_axes.items():
+#         combos = list(itertools.product(eps_grid, repeat=len(axes)))   # density^2
+#         print(f"\n  -- min r_{mode}  ({len(combos)} grid pts) --")
+#         warm = None
+#         for combo in combos:
+#             eps_dict = dict(zip(axes, combo))
+#             tag = "  ".join(f"e_{k}={v:.2f}" for k, v in eps_dict.items())
+#             print(f"    {tag}", end=" ... \n", flush=True)
+#             sol = _solve_one(mode, eps_dict, warm=warm)
+#             if sol is None:
+#                 print("INFEASIBLE")
+#             else:
+#                 print(f"OK  ({sol['r_ped']:.3f}, {sol['r_ego']:.3f}, {sol['r_amb']:.3f})"
+#                       f"  {sol['t_solve']:.2f}s")
+#                 warm = sol 
+#                 results.append(sol)
+
+#     # ── 8. Fallback if all infeasible ─────────────────────────────────────────
+#     if not results:
+#         print("  All solves infeasible -- emergency braking.")
+#         fb = carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0,
+#                                   manual_gear_shift=False)
+#         return {"status": False, "control": fb, "deltas": None,
+#                 "t_build": 0., "t_solve": 0.,
+#                 "num_constraints": None, "num_variables": None}
+
+#     # ── 9. Pareto filter ──────────────────────────────────────────────────────
+#     pts    = np.array([[r["r_ped"], r["r_ego"], r["r_amb"]] for r in results])
+#     mask   = _pareto_filter(pts)
+#     pareto = [results[i] for i in range(len(results)) if mask[i]]
+#     print(f"\n  Pareto: {len(pareto)} / {len(results)} solutions retained")
+
+#     # pick solution whose first control step deviates least from nominal
+#     best = min(pareto, key=lambda r: np.linalg.norm(r["u_opt"][:, 0] - U_nom[0]))
+
+#     # ── 10. Debug draw ────────────────────────────────────────────────────────
+#     draw_sample_traj(client.world, best["x_opt"][:2, :].T,
+#                      color=COLORS["blue"],  life_time=lt)
+
+#     # ── 11. Convert first control step to CARLA VehicleControl ───────────────
+#     a, beta = best["u_opt"][:, 0]
+#     control = bicycle_to_carla([a, beta],
+#                                ego.acc_min, ego.acc_max,
+#                                ego.beta_min, ego.beta_max)
+
+#     print(f"  Best [{best['mode']}]: "
+#           f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})"
+#           f"deltas={best['deltas']}")
+#     # print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
+
+#     return {
+#         "status":          True,
+#         "control":         control,
+#         "deltas":          best["deltas"],
+#         "t_build":         best["t_build"],
+#         "t_solve":         best["t_solve"],
+#         "num_constraints": best["num_constraints"],
+#         "num_variables":   best["num_variables"],
+#     }
+
+
 import itertools
 import carla
 import numpy as np
 import cvxpy as cp
 import math
 import time
+import gurobipy as gp
 
 from src.bicycle import KinematicBicycle
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
-from exp1.stl import safe_distance_vehicle, safe_distance_walker, clear_intersection, stay_in_lane, _promote
+from exp1.stl import safe_distance_vehicle, safe_distance_walker, stay_in_lane, _promote
 
-import gurobipy as gp
+_ENV = gp.Env(params={"OutputFlag": 0})
 
-# module-level, created once
-_GRB_ENV = gp.Env(params={"OutputFlag": 0})
-
-_GRB_PARAMS = dict(
-    # termination
-    TimeLimit    = 10.0,   
-    MIPGap       = 0.0,    
-
-    # big-M numerics
-    IntFeasTol   = 1e-7,   
-    NumericFocus = 2,      
-    Presolve     = 2,      
-
-    # search strategy
-    MIPFocus     = 1,      
-    Heuristics   = 0.1,    
-    Cuts         = 2,      
-
-    # determinism for reproducibility
-    Threads      = 4,      
-    Seed         = 0,
+_SOLVER_PARAMS = dict(
+    TimeLimit=10.0, MIPGap=0.0,
+    IntFeasTol=1e-7, NumericFocus=2, Presolve=2,
+    MIPFocus=1, Heuristics=0.1, Cuts=2,
+    Threads=4, Seed=0,
 )
-              
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper functions
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _ego_state(ego) -> np.ndarray:
-    """Return ego state [px, py, theta_rad, speed_mps]."""
-    tf  = ego.get_transform()
-    vel = ego.get_velocity()
-    return np.array([tf.location.x, tf.location.y,
-                     math.radians(tf.rotation.yaw),
-                     math.sqrt(vel.x**2 + vel.y**2)])
 
 
-def _build_nominal(ego, model, dt, N, ego_init):
-    """
-    Derive U_nom from the autopilot waypoint plan, roll out X_nom,
-    and linearise the bicycle dynamics at each step.
-    Returns X_nom (N+1,4), U_nom (N,2), A_seq, B_seq, c_seq.
-    """
-    ctrl         = ego.agent.run_step()
-    a_nom, b_nom = carla_to_bicycle(ctrl, ego.acc_min, ego.acc_max,
-                                    ego.beta_min, ego.beta_max)
-    plan = list(ego.agent.get_local_planner().get_plan())
+def ego_state(ego):
+    tf = ego.get_transform()
+    v = ego.get_velocity()
+    return np.array([
+        tf.location.x, tf.location.y,
+        math.radians(tf.rotation.yaw),
+        math.sqrt(v.x**2 + v.y**2),
+    ])
 
-    U_nom = np.zeros((N, 2))
+
+def build_nominal(ego, dt, N, x0):
+    model = KinematicBicycle(lr=ego.lr, dt=dt)
+    ctrl = ego.agent.run_step()
+    a0, _ = carla_to_bicycle(ctrl, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
+
+    U = np.zeros((N, 2))
     for k in range(N):
-        if k < len(plan) - 1:
-            wp_c  = plan[k][0].transform
-            wp_n  = plan[k+1][0].transform
-            yaw_n = math.atan2(wp_n.location.y - wp_c.location.y,
-                               wp_n.location.x - wp_c.location.x)
-            if k == 0:
-                dyaw = yaw_n - ego_init[2]
-            else:
-                wp_p  = plan[k-1][0].transform
-                yaw_p = math.atan2(wp_c.location.y - wp_p.location.y,
-                                   wp_c.location.x - wp_p.location.x)
-                dyaw  = yaw_n - yaw_p
-            v_est    = max(ego_init[3] + a_nom * k * dt, 0.5)
-            beta_k   = np.clip(dyaw * ego.lr / (v_est * dt), ego.beta_min, ego.beta_max)
-            U_nom[k] = [a_nom, beta_k]
-        else:
-            U_nom[k] = [a_nom, b_nom]
+        U[k] = [a0, 0.0]
 
-    X_nom = np.zeros((N+1, 4));  X_nom[0] = ego_init.copy()
-    A_seq, B_seq, c_seq = [], [], []
+    X = np.zeros((N + 1, 4))
+    X[0] = x0.copy()
+    A_list, B_list, c_list = [], [], []
+
     for k in range(N):
-        A_k, B_k    = model.linearize(X_nom[k], U_nom[k])
-        X_nom[k+1]  = model.step(X_nom[k], U_nom[k])
-        c_k         = X_nom[k+1] - A_k @ X_nom[k] - B_k @ U_nom[k]
-        A_seq.append(A_k);  B_seq.append(B_k);  c_seq.append(c_k)
+        A, B = model.linearize(X[k], U[k])
+        X[k + 1] = model.step(X[k], U[k])
+        c = X[k + 1] - A @ X[k] - B @ U[k]
+        A_list.append(A)
+        B_list.append(B)
+        c_list.append(c)
 
-    return X_nom, U_nom, A_seq, B_seq, c_seq
+    return X, U, A_list, B_list, c_list
 
 
-def _risk_weights(ego_pos_nom, ego_vel_nom, trajs,
-                  d_coll, mu, V_agent, V_ego, sev_scale, dt, S):
+def encode_collision(x_var, trajs, d_safe, label, M=500):
     """
-    Compute fixed per-scenario risk weights from the *nominal* ego trajectory.
-    Severity = mu * ||v_ego - v_agent|| / sev_scale.
-    Divided by K so that sum(r_agent) approximates E[risk] over the tail.
-
-    Returns r_agent (K,), r_ego (K,).
-    """
-    K = trajs.shape[0]
-    r_agent, r_ego = np.zeros(K), np.zeros(K)
-    for n in range(K):
-        pos  = trajs[n, :, :2]
-        hits = np.where(np.linalg.norm(ego_pos_nom - pos, axis=1) <= d_coll)[0]
-        if hits.size == 0:
-            continue
-        t       = hits[0]
-        v_agent = (pos[t] - pos[t-1]) / dt if t > 0 else np.zeros(2)
-        sev     = mu * np.linalg.norm(ego_vel_nom[t] - v_agent) / sev_scale
-        r_agent[n] = sev * V_agent / S
-        r_ego[n]   = sev * V_ego   / S
-    return r_agent, r_ego
-
-
-def _encode_collision(x_var, trajs, d_safe, label, K_total=None):
-    """
-    MILP encoding of empirical collision probability for one agent group.
-    Uses the same square keep-out box (half-side d_safe) as the STL layer,
-    so "collision" means the same thing in both.
-
-        P = (1/K) * sum_n z_n,   z_n = 1 iff scenario n enters the box
-
-    Per (n, k), four separation binaries each implying genuine clearance:
-        p_pos = 1  =>   dx >= d_safe
-        p_neg = 1  =>  -dx >= d_safe
-        q_pos = 1  =>   dy >= d_safe
-        q_neg = 1  =>  -dy >= d_safe
-    If none can be set, ego is inside the box, so z_n is forced on:
-        z_n >= 1 - (p_pos + p_neg + q_pos + q_neg)
+    P = (1/K) * sum(z_n).  z_n = 1 iff scenario n enters the box at any step.
+    Four separation binaries per (n, k); no partition gap, no strict epsilon.
     """
     K, T, _ = trajs.shape
-    denom   = float(K_total if K_total is not None else K)
-    M       = float(np.abs(trajs[:, :, :2]).ptp()) + d_safe + 1.0
 
-    p_pos = cp.Variable((K, T), boolean=True, name=f"pp_{label}")
-    p_neg = cp.Variable((K, T), boolean=True, name=f"pn_{label}")
-    q_pos = cp.Variable((K, T), boolean=True, name=f"qp_{label}")
-    q_neg = cp.Variable((K, T), boolean=True, name=f"qn_{label}")
-    z_n   = cp.Variable(K,      boolean=True, name=f"zn_{label}")
+    pp = cp.Variable((K, T), boolean=True, name=f"pp_{label}")
+    pn = cp.Variable((K, T), boolean=True, name=f"pn_{label}")
+    qp = cp.Variable((K, T), boolean=True, name=f"qp_{label}")
+    qn = cp.Variable((K, T), boolean=True, name=f"qn_{label}")
+    z = cp.Variable(K, boolean=True, name=f"z_{label}")
 
-    PX = _promote(x_var[0, :T], K)          # (K, T)
+    PX = _promote(x_var[0, :T], K)
     PY = _promote(x_var[1, :T], K)
     AX = trajs[:, :T, 0].astype(float)
     AY = trajs[:, :T, 1].astype(float)
-    DX, DY = PX - AX, PY - AY
+    DX = PX - AX
+    DY = PY - AY
 
     cons = [
-         DX >= d_safe - M * (1 - p_pos),
-        -DX >= d_safe - M * (1 - p_neg),
-         DY >= d_safe - M * (1 - q_pos),
-        -DY >= d_safe - M * (1 - q_neg),
-        cp.vstack([z_n for _ in range(T)]).T >= 1 - p_pos - p_neg - q_pos - q_neg,
+        DX >= d_safe - M * (1 - pp),
+        -DX >= d_safe - M * (1 - pn),
+        DY >= d_safe - M * (1 - qp),
+        -DY >= d_safe - M * (1 - qn),
+        cp.vstack([z for _ in range(T)]).T >= 1 - pp - pn - qp - qn,
     ]
-    return z_n, cp.sum(z_n) / denom, cons
+
+    prob = cp.sum(z) / float(K)
+    return z, prob, cons
 
 
-def _pareto_filter(pts) -> np.ndarray:
-    """
-    Return boolean mask of non-dominated rows in pts (M, 3).
-    Row i is dominated iff some row j has all values <= and at least one <.
-    """
-    n, mask = len(pts), np.ones(len(pts), dtype=bool)
+def pareto_filter(pts):
+    n = len(pts)
+    mask = np.ones(n, dtype=bool)
     for i in range(n):
         for j in range(n):
             if i != j and np.all(pts[j] <= pts[i]) and np.any(pts[j] < pts[i]):
@@ -170,239 +485,193 @@ def _pareto_filter(pts) -> np.ndarray:
     return mask
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main function
-# ─────────────────────────────────────────────────────────────────────────────
-
 def solve_mpc_pareto(client, agents, cfg, emergency):
-    """
-    Multi-objective MPC via epsilon-constraint method with MILP risk encoding.
 
-    Objectives  : r_ped, r_ego, r_amb
-    STL cons    : safe_distance (ped, amb) + clear_intersection + lane_keeping
-    Epsilon grid: density evenly-spaced values in (0,1] per free axis
-                  -> density^2 grid points per mode, 3*density^2 total solves
-    Selection   : Pareto-filter then pick control closest to nominal first step.
-
-    agents : [ego (Vehicle), amb (Vehicle), ped (Walker)]
-    """
-
-    # ── 0. Config ─────────────────────────────────────────────────────────────
-    T_sim   = cfg["mpc"]["horizon"]
-    S       = cfg["mpc"]["num_samples"]
-    P       = cfg["mpc"]["num_prob"]
-    dt      = cfg["carla"]["dt"]
-    N       = int(round(T_sim / dt))
+    # config
+    T_sim = cfg["mpc"]["horizon"]
+    S = cfg["mpc"]["num_samples"]
+    P = cfg["mpc"]["num_prob"]
+    dt = cfg["carla"]["dt"]
+    N = int(round(T_sim / dt))
     density = cfg["mpc"]["density"]
-    lt      = dt * 1.5
+    lt = dt * 1.5
 
-    d_ped   = float(cfg["stl"]["pedestrian"])
-    d_amb   = float(cfg["stl"]["ambulance"])
+    d_ped = float(cfg["stl"]["pedestrian"])
+    d_amb = float(cfg["stl"]["ambulance"])
 
     ego, amb, ped = agents[0], agents[1], agents[2]
 
-    # ── 1. Ego state + nominal trajectory ─────────────────────────────────────
-    model    = KinematicBicycle(lr=ego.lr, dt=dt)
-    ego_init = _ego_state(ego)
-    X_nom, U_nom, A_seq, B_seq, c_seq = _build_nominal(ego, model, dt, N, ego_init)
+    # nominal trajectory and linearisation
+    x0 = ego_state(ego)
+    X_nom, U_nom, A, B, c = build_nominal(ego, dt, N, x0)
 
-    ego_pos_nom = X_nom[:, :2]                                       
-    ego_vel_nom = np.stack([X_nom[:,3]*np.cos(X_nom[:,2]),           
-                            X_nom[:,3]*np.sin(X_nom[:,2])], axis=1)
+    # sample trajectories for STL and probability encoding
+    ped_stl = ped.sample_trajectories(N, dt, S)
+    amb_stl = amb.sample_trajectories(N, dt, S)
+    ped_prob = ped.sample_trajectories(N, dt, P)
+    amb_prob = amb.sample_trajectories(N, dt, P)
 
-    ped_trajs = ped.sample_trajectories(N, dt, S)                            
-    amb_trajs = amb.sample_trajectories(N, dt, S)
+    # epsilon grid over [0, 1]
+    eps_grid = np.linspace(0, 1, density + 1)[1:]
 
-    ped_trajs_P = ped.sample_trajectories(N, dt, P)                            
-    amb_trajs_P = amb.sample_trajectories(N, dt, P)                            
+    free_axes = {
+        "ped": ["ego", "amb"],
+        "ego": ["ped", "amb"],
+        "amb": ["ped", "ego"],
+    }
 
+    def solve_one(mode, eps_dict, warm=None):
 
-    # ── 4. Solver ─────────────────────────────────────────────────────────────
-    solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
-                   if s in cp.installed_solvers()), None)
-        
-    # ── 5. Epsilon grid: density points in (0, 1] per axis ───────────────────
-    eps_grid = np.linspace(0, 1, density + 1)[1:]   # e.g. [0.5, 1.0] for density=2
-
-    # each mode frees its own epsilon; the other two axes form the grid
-    _free_axes = {"ped": ["ego", "amb"],
-                  "ego": ["ped", "amb"],
-                  "amb": ["ped", "ego"]}
-
-    # ── 6. Single MPC solve ───────────────────────────────────────────────────
-    def _solve_one(mode, eps_dict, warm=None):
-        """
-        Build and solve one epsilon-constraint MILP.
-
-        mode     : "ped" | "ego" | "amb"   objective to minimise
-        eps_dict : {name: value} upper bounds on the other two risk objectives
-        Returns result dict, or None if infeasible.
-        """
         t0 = time.perf_counter()
 
-        x_var = cp.Variable((4, N+1), name="x")
-        u_var = cp.Variable((2, N),   name="u")
-        cons  = [x_var[:, 0] == ego_init]
+        x = cp.Variable((4, N + 1), name="x")
+        u = cp.Variable((2, N), name="u")
+        cons = [x[:, 0] == x0]
 
-        # linearised dynamics + control bounds (identical for every solve)
+        # dynamics and control bounds
         for k in range(N):
-            cons += [x_var[:,k+1] == A_seq[k]@x_var[:,k] + B_seq[k]@u_var[:,k] + c_seq[k],
-                     u_var[0,k] >= ego.acc_min,  u_var[0,k] <= ego.acc_max,
-                     u_var[1,k] >= ego.beta_min, u_var[1,k] <= ego.beta_max]
+            cons += [
+                x[:, k+1] == A[k] @ x[:, k] + B[k] @ u[:, k] + c[k],
+                u[0, k] >= ego.acc_min, u[0, k] <= ego.acc_max,
+                u[1, k] >= ego.beta_min, u[1, k] <= ego.beta_max,
+            ]
 
-        # STL soft constraints (structural; shared across all solves)
+        # STL constraints
         deltas = {}
+
         if emergency:
-            c, d_ped_stl = safe_distance_walker(x_var, ped_trajs, d_ped, label="ped")
-            cons += c
+            c_ped, d_ped_stl = safe_distance_walker(x, ped_stl, d_ped, label="ped")
+            cons += c_ped
             cons += [d_ped_stl <= d_ped]
             deltas["ped"] = d_ped_stl
 
-        c, d_amb_stl = safe_distance_vehicle(x_var, amb_trajs, d_amb, label="amb")
-        cons += c
-        cons += [d_ped_stl <= d_amb]
+        c_amb, d_amb_stl = safe_distance_vehicle(x, amb_stl, d_amb, label="amb")
+        cons += c_amb
+        cons += [d_amb_stl <= d_amb]
         deltas["amb"] = d_amb_stl
 
-        c, d_lane = stay_in_lane(x_var, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
-        cons += c 
-        # set max relaxation to 4 (approximate width of a lane) for realistic physical meaning
-        cons += [d_lane <= 4]
+        c_lane, d_lane = stay_in_lane(x, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
+        cons += c_lane
+        cons += [d_lane <= 3]
         deltas["lane"] = d_lane
 
-        # c, d_int = clear_intersection(x_var, y_exit=0.0, N=N)
-        # cons += c 
-        # deltas["inter"] = d_int
+        # probability encoding
+        z_ped, p_ped, c_pe = encode_collision(x, ped_prob, d_ped, "ped")
+        z_amb, p_amb, c_ae = encode_collision(x, amb_prob, d_amb, "amb")
+        cons += c_pe + c_ae
 
-        # MILP probability encoding
-        z_ped_var, p_ped_expr, c_ped = _encode_collision(x_var, ped_trajs_P, d_ped, "ped")
-        z_amb_var, p_amb_expr, c_amb = _encode_collision(x_var, amb_trajs_P, d_amb, "ped")
-        cons += c_ped + c_amb
-
-        # z_any[n] = z_ped[n] OR z_amb[n]. Only the forcing direction is needed;
-        # z_any is minimised / upper-bounded, so it never switches on spuriously.
         z_any = cp.Variable(P, boolean=True, name="z_any")
-        cons += [z_any >= z_ped_var, z_any >= z_amb_var]
-        p_ego_expr = cp.sum(z_any) / float(P)
+        cons += [z_any >= z_ped, z_any >= z_amb]
+        p_ego = cp.sum(z_any) / float(P)
 
-        risk_exprs = {"ped": p_ped_expr, "ego": p_ego_expr, "amb": p_amb_expr}
+        probs = {"ped": p_ped, "ego": p_ego, "amb": p_amb}
 
+        # epsilon constraints on non-minimised objectives
         for name, eps_val in eps_dict.items():
-            cons.append(risk_exprs[name] <= float(eps_val))
+            cons.append(probs[name] <= float(eps_val))
 
-        # W_BETA      = 5e-2    # steering magnitude
-        # W_DBETA     = 5e-2    # steering rate  (10x magnitude — this is the key term)
+        W = 1e-4
 
-        # # L1 version — keeps the problem a pure MILP
-        # s_beta = cp.Variable(N - 1, nonneg=True)
-        # cons += [s_beta >=  cp.diff(u_var[1, :]),
-        #          s_beta >= -cp.diff(u_var[1, :])]
-        # smoothness = W_DBETA * cp.sum(s_beta) + W_BETA * cp.norm(u_var[1, :], 1)
-
-        objective = cp.Minimize(
-            risk_exprs[mode]
-            + cp.norm(u_var - U_nom.T, 1)
+        smoothness = (
+            cp.norm(cp.diff(u[0, :]), 1)       # acceleration rate (jerk)
+            + cp.norm(cp.diff(u[1, :]), 1)     # steering rate
+            + cp.norm(cp.diff(x[0, :]), 1)     # position smoothness x
+            + cp.norm(cp.diff(x[1, :]), 1)     # position smoothness y
         )
 
-        # minimise chosen risk; small delta penalty keeps STL slack tight
-        # objective = cp.Minimize(risk_exprs[mode] + 1e-3 * sum(deltas.values()))
-        # objective = cp.Minimize(sum(deltas.values()))
+        objective = cp.Minimize(probs[mode] + W * smoothness)
+
+        # objective = cp.Minimize(probs[mode])
+
         prob = cp.Problem(objective, cons)
 
-        n_cons  = sum(c.size for c in cons)
-        n_vars  = sum(v.size for v in prob.variables())
+        n_cons = sum(ci.size for ci in cons)
+        n_vars = sum(vi.size for vi in prob.variables())
         t_build = time.perf_counter() - t0
 
         t1 = time.perf_counter()
-
         if warm is not None:
-            x_var.value = warm["x_opt"]        # cvxpy passes these as MIP start
-            u_var.value = warm["u_opt"]
-            prob.solve(solver=cp.GUROBI, env=_GRB_ENV, warm_start=True, **_GRB_PARAMS)
+            x.value = warm["x_opt"]
+            u.value = warm["u_opt"]
+            prob.solve(solver=cp.GUROBI, env=_ENV, warm_start=True, **_SOLVER_PARAMS)
         else:
-            prob.solve(solver=cp.GUROBI, env=_GRB_ENV, **_GRB_PARAMS)
-
+            prob.solve(solver=cp.GUROBI, env=_ENV, **_SOLVER_PARAMS)
         t_solve = time.perf_counter() - t1
-        print(f"t_solve: {t_solve:.3f}, n_cons: {n_cons}, n_vars: {n_vars}")
+
+        print(f"  t_solve: {t_solve:.3f}s  vars: {n_vars}  cons: {n_cons}  [{prob.status}]")
 
         if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
-            print(f"[{prob.status}]", end=" ")
             return None
 
         return {
-            "mode":            mode,
-            "x_opt":           x_var.value,
-            "u_opt":           u_var.value,
-            "r_ped":           float(r_ped_expr.value),
-            "r_ego":           float(r_ego_expr.value),
-            "r_amb":           float(r_amb_expr.value),
-            "deltas":          {k: float(v.value) for k, v in deltas.items()
-                                if v.value is not None},
-            "t_build":         t_build,
-            "t_solve":         t_solve,
+            "mode": mode,
+            "x_opt": x.value,
+            "u_opt": u.value,
+            "p_ped": float(p_ped.value),
+            "p_ego": float(p_ego.value),
+            "p_amb": float(p_amb.value),
+            "deltas": {k: float(v.value) for k, v in deltas.items() if v.value is not None},
+            "t_build": t_build,
+            "t_solve": t_solve,
             "num_constraints": n_cons,
-            "num_variables":   n_vars,
+            "num_variables": n_vars,
         }
 
-    # ── 7. Epsilon-constraint sweep ───────────────────────────────────────────
+    # epsilon-constraint sweep
     results = []
-    for mode, axes in _free_axes.items():
-        combos = list(itertools.product(eps_grid, repeat=len(axes)))   # density^2
-        print(f"\n  -- min r_{mode}  ({len(combos)} grid pts) --")
+    for mode, axes in free_axes.items():
+        combos = list(itertools.product(eps_grid, repeat=len(axes)))
+        print(f"\n  -- min p_{mode}  ({len(combos)} grid pts) --")
         warm = None
         for combo in combos:
             eps_dict = dict(zip(axes, combo))
             tag = "  ".join(f"e_{k}={v:.2f}" for k, v in eps_dict.items())
-            print(f"    {tag}", end=" ... \n", flush=True)
-            sol = _solve_one(mode, eps_dict, warm=warm)
+            print(f"    {tag}")
+            sol = solve_one(mode, eps_dict, warm=warm)
             if sol is None:
-                print("INFEASIBLE")
+                print("    INFEASIBLE")
             else:
-                print(f"OK  ({sol['r_ped']:.3f}, {sol['r_ego']:.3f}, {sol['r_amb']:.3f})"
-                      f"  {sol['t_solve']:.2f}s")
-                warm = sol 
+                warm = sol
                 results.append(sol)
+                print(f"    p=({sol['p_ped']:.3f}, {sol['p_ego']:.3f}, {sol['p_amb']:.3f})")
 
-    # ── 8. Fallback if all infeasible ─────────────────────────────────────────
+    # fallback
     if not results:
-        print("  All solves infeasible -- emergency braking.")
-        fb = carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0,
-                                  manual_gear_shift=False)
-        return {"status": False, "control": fb, "deltas": None,
-                "t_build": 0., "t_solve": 0.,
-                "num_constraints": None, "num_variables": None}
+        print("  All infeasible -- emergency braking.")
+        return {
+            "status": False,
+            "control": carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0),
+            "deltas": None,
+            "t_build": 0.0, "t_solve": 0.0,
+            "num_constraints": None, "num_variables": None,
+        }
 
-    # ── 9. Pareto filter ──────────────────────────────────────────────────────
-    pts    = np.array([[r["r_ped"], r["r_ego"], r["r_amb"]] for r in results])
-    mask   = _pareto_filter(pts)
+    # pareto filter
+    pts = np.array([[r["p_ped"], r["p_ego"], r["p_amb"]] for r in results])
+    mask = pareto_filter(pts)
     pareto = [results[i] for i in range(len(results)) if mask[i]]
-    print(f"\n  Pareto: {len(pareto)} / {len(results)} solutions retained")
+    print(f"\n  Pareto: {len(pareto)} / {len(results)} retained")
 
-    # pick solution whose first control step deviates least from nominal
     best = min(pareto, key=lambda r: np.linalg.norm(r["u_opt"][:, 0] - U_nom[0]))
 
-    # ── 10. Debug draw ────────────────────────────────────────────────────────
-    draw_sample_traj(client.world, best["x_opt"][:2, :].T,
-                     color=COLORS["blue"],  life_time=lt)
+    # draw and apply
+    draw_sample_traj(client.world, best["x_opt"][:2, :].T, color=COLORS["blue"], life_time=lt)
 
-    # ── 11. Convert first control step to CARLA VehicleControl ───────────────
-    a, beta = best["u_opt"][:, 0]
-    control = bicycle_to_carla([a, beta],
-                               ego.acc_min, ego.acc_max,
-                               ego.beta_min, ego.beta_max)
+    a_opt, beta_opt = best["u_opt"][:, 0]
+    control = bicycle_to_carla(
+        [a_opt, beta_opt], ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max
+    )
 
     print(f"  Best [{best['mode']}]: "
-          f"r=({best['r_ped']:.4f}, {best['r_ego']:.4f}, {best['r_amb']:.4f})"
+          f"p=({best['p_ped']:.3f}, {best['p_ego']:.3f}, {best['p_amb']:.3f})  "
           f"deltas={best['deltas']}")
-    # print("max beta diff:", np.abs(np.diff(best["u_opt"][1, :])).max())
 
     return {
-        "status":          True,
-        "control":         control,
-        "deltas":          best["deltas"],
-        "t_build":         best["t_build"],
-        "t_solve":         best["t_solve"],
+        "status": True,
+        "control": control,
+        "deltas": best["deltas"],
+        "t_build": best["t_build"],
+        "t_solve": best["t_solve"],
         "num_constraints": best["num_constraints"],
-        "num_variables":   best["num_variables"],
+        "num_variables": best["num_variables"],
     }
-
-
