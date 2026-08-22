@@ -500,7 +500,7 @@ def set_traffic_lights_by_location(
     return result
 
 
-def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
+def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0, z=0.5):
     """
     Draw sample trajectories in CARLA.
 
@@ -527,8 +527,8 @@ def draw_sample_traj(world, trajs, color=None, size=0.05, life_time=1.0):
 
     for s in range(S):
         for k in range(N1 - 1):
-            start = carla.Location(x=float(trajs[s, k, 0]),   y=float(trajs[s, k, 1]),   z=0.5)
-            end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=0.5)
+            start = carla.Location(x=float(trajs[s, k, 0]),   y=float(trajs[s, k, 1]),   z=z)
+            end   = carla.Location(x=float(trajs[s, k+1, 0]), y=float(trajs[s, k+1, 1]), z=z)
             debug.draw_line(start, end, thickness=size, color=color, life_time=life_time)
 
 

@@ -13,30 +13,45 @@ carla:
   dt: 0.1 
   sync_mode: true
   spectator:
-    location: {x: -200.503, y: 10.774, z: 20.530}
-    rotation: {pitch: -26.282, yaw: -178.128, roll: 0.000}
+    location: {x: -263.608, y: 8.335, z: 7.508}
+    rotation: {pitch: -19.566, yaw: -0.978, roll: 0.000}
 
 mpc:
   horizon: 2             
-  num_samples: 100        
-  sim_start: 13    
-  sim_end: 8
+  num_samples: 30
+  num_prob: 30        
+  sim_start: 3
+  emergency_start: 5     
+  sim_end: 15
   type: "pareto"
   density: 1
 
 stl:
-  pedestrian: 3   
-  ambulance: 5
+  d_safe_x: 10.0
+  d_safe_y: 3.0
+  d_crash: 0.5
+  a_comfort: -3.5
+  beta_rate_max: 0.1
+
+  x_min: -346.205
+  x_max: -156.287
+  y_min: 4.102
+  y_max: 14.067
+
+  crash_x_min: -259.097
+  crash_x_max: -248.818
+  crash_y_min: 5.105
+  crash_y_max: 7.822
 
 ego_vehicle:
   blueprint: "vehicle.tesla.model3"
   autopilot: True
-  draw_route: True
+  draw_route: False
   behavior: "aggressive"
   target_speed: 60
   spawn:
-    location: {x: -120.657, y: 5.447, z: 12.040}
-    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+    location: {x: -165.657, y: 5.447, z: 8.040}
+    rotation: {pitch: -15.836, yaw: -180.304, roll: -0.000}
   destination:
     location: {x: -280.862, y: 6.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
@@ -52,25 +67,27 @@ ego_vehicle:
 leader:
   blueprint: "vehicle.dodge.charger_2020"
   autopilot: True
-  draw_route: True
-  behavior: "normal"
+  draw_route: False
+  behavior: "aggressive"
   target_speed: 60
   spawn:
-    location: {x: -130.657, y: 5.447, z: 12.040}
-    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+    location: {x: -180.657, y: 5.447, z: 8.040}
+    rotation: {pitch: -15.836, yaw: -180.304, roll: -0.000}
   destination:
     location: {x: -280.862, y: 6.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+  std_acc: 0.1
+  std_steer: 0.005
 
 follower:
   blueprint: "vehicle.audi.etron"
   autopilot: True
-  draw_route: True
-  behavior: "normal"
+  draw_route: False
+  behavior: "aggressive"
   target_speed: 60
   spawn:
-    location: {x: -105.657, y: 5.447, z: 12.040}
-    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+    location: {x: -145.657, y: 5.447, z: 12.040}
+    rotation: {pitch: -15.836, yaw: -180.304, roll: -0.000}
   destination:
     location: {x: -280.862, y: 6.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
@@ -78,12 +95,12 @@ follower:
 left_vehicle:
   blueprint: "vehicle.mercedes.coupe_2020"
   autopilot: True
-  draw_route: True
-  behavior: "normal"
+  draw_route: False
+  behavior: "aggressive"
   target_speed: 60
   spawn:
-    location: {x: -110.657, y: 8.447, z: 12.040}
-    rotation: {pitch: -15.836, yaw: -172.304, roll: -0.000}
+    location: {x: -160.657, y: 8.447, z: 8.040}
+    rotation: {pitch: -15.836, yaw: -180.304, roll: -0.000}
   destination:
     location: {x: -280.862, y: 8.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}

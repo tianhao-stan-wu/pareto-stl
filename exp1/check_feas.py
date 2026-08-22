@@ -36,6 +36,9 @@ def check_feasibility(client, agents, cfg, emergency):
     ped_trajs = ped.sample_trajectories(N, dt, S)
     amb_trajs = amb.sample_trajectories(N, dt, S)
 
+    draw_sample_traj(client.world, ped_trajs, color=COLORS["red"], life_time=lt)
+    draw_sample_traj(client.world, amb_trajs, color=COLORS["green"], life_time=lt)
+
     t0 = time.perf_counter()
 
     x = cp.Variable((4, N + 1), name="x")
@@ -70,10 +73,8 @@ def check_feasibility(client, agents, cfg, emergency):
     deltas["lane"] = d_lane
 
     # objective: track nominal, no slack term
-    W_DELTA = 1e4
     objective = cp.Minimize(
-        W_DELTA * sum(deltas.values())
-        + cp.norm(u - U_nom.T, 1)
+        cp.norm(u - U_nom.T, 1)
         + cp.norm(x - X_nom.T, 1)
     )
     prob = cp.Problem(objective, cons)
