@@ -127,10 +127,11 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     eps_grid = np.linspace(0, 1, density + 1)[1:]
 
     free_axes = {
-        "ped": ["ego", "amb"],
-        "ego": ["ped", "amb"],
-        "amb": ["ped", "ego"],
+        "ped": ["amb"],
+        "amb": ["ped"],
     }
+
+    t2 = time.perf_counter()
 
     def solve_one(mode, eps_dict, warm=None):
 
@@ -174,9 +175,8 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
 
         z_any = cp.Variable(P, boolean=True, name="z_any")
         cons += [z_any >= z_ped, z_any >= z_amb]
-        p_ego = cp.sum(z_any) / float(P)
-
-        probs = {"ped": p_ped, "ego": p_ego, "amb": p_amb}
+ 
+        probs = {"ped": p_ped, "amb": p_amb}
 
         # epsilon constraints on non-minimised objectives
         for name, eps_val in eps_dict.items():
@@ -192,14 +192,12 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         )
 
         objective = cp.Minimize(probs[mode] + W * smoothness)
-
-        # objective = cp.Minimize(probs[mode])
-
         prob = cp.Problem(objective, cons)
+
+        t_build = time.perf_counter() - t0
 
         n_cons = sum(ci.size for ci in cons)
         n_vars = sum(vi.size for vi in prob.variables())
-        t_build = time.perf_counter() - t0
 
         t1 = time.perf_counter()
         if warm is not None:
@@ -220,7 +218,6 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             "x_opt": x.value,
             "u_opt": u.value,
             "p_ped": float(p_ped.value),
-            "p_ego": float(p_ego.value),
             "p_amb": float(p_amb.value),
             "deltas": {k: float(v.value) for k, v in deltas.items() if v.value is not None},
             "t_build": t_build,
@@ -245,7 +242,9 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             else:
                 warm = sol
                 results.append(sol)
-                print(f"    p=({sol['p_ped']:.3f}, {sol['p_ego']:.3f}, {sol['p_amb']:.3f})")
+                print(f"    p=({sol['p_ped']:.3f}, {sol['p_amb']:.3f})")
+
+    t_solve_all = time.perf_counter() - t2
 
     # fallback
     if not results:
@@ -253,13 +252,10 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         return {
             "status": False,
             "control": carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0),
-            "deltas": None,
-            "t_build": 0.0, "t_solve": 0.0,
-            "num_constraints": None, "num_variables": None,
         }
 
     # pareto filter
-    pts = np.array([[r["p_ped"], r["p_ego"], r["p_amb"]] for r in results])
+    pts = np.array([[r["p_ped"], r["p_amb"]] for r in results])
     mask = pareto_filter(pts)
     pareto = [results[i] for i in range(len(results)) if mask[i]]
     print(f"\n  Pareto: {len(pareto)} / {len(results)} retained")
@@ -275,8 +271,11 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     )
 
     print(f"  Best [{best['mode']}]: "
-          f"p=({best['p_ped']:.3f}, {best['p_ego']:.3f}, {best['p_amb']:.3f})  "
+          f"p=({best['p_ped']:.3f}, {best['p_amb']:.3f})  "
           f"deltas={best['deltas']}")
+
+    # record all points for later plotting
+    best_idx = next(i for i in range(len(results)) if results[i] is best)
 
     return {
         "status": True,
@@ -284,6 +283,12 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         "deltas": best["deltas"],
         "t_build": best["t_build"],
         "t_solve": best["t_solve"],
+        "t_solve_all": t_solve_all,
         "num_constraints": best["num_constraints"],
         "num_variables": best["num_variables"],
+        "pareto_log": {
+            "all_points": pts.tolist(),
+            "pareto_mask": mask.tolist(),
+            "selected_idx": int(best_idx),
+        },
     }

@@ -70,40 +70,80 @@ def save_frame(img_queue, img_dir, tick, timeout=1.0):
         print(f"Warning: no image at tick {tick}")
 
 
-def save_stats(build_times, solve_times, num_constraints, num_variables, log_dir):
-    """Save timing and problem size stats to stats.json."""
+def save_stats(
+    feas_build_times, feas_solve_times, feas_num_constraints, feas_num_variables,
+    pareto_build_times, pareto_solve_times, pareto_solve_all_times,
+    pareto_num_constraints, pareto_num_variables,
+    total_tick, n_infeas, n_infeas_resolved,
+    log_dir,
+):
+    def summarise(times):
+        if not times:
+            return {"avg": 0, "min": 0, "max": 0, "n": 0, "values": []}
+        return {
+            "avg": sum(times) / len(times),
+            "min": min(times),
+            "max": max(times),
+            "n": len(times),
+            "values": times,
+        }
+
+    infeas_rate = n_infeas / total_tick if total_tick > 0 else 0
+    completion_rate = (total_tick - n_infeas + n_infeas_resolved) / total_tick if total_tick > 0 else 0
+
     stats = {
-        "build_times": {
-            "avg": sum(build_times) / len(build_times),
-            "min": min(build_times),
-            "max": max(build_times),
-            "n": len(build_times),
-            "values": build_times,
+        "simulation": {
+            "simulation_steps": total_tick,
+            "n_infeas": n_infeas,
+            "infeas_rate": round(infeas_rate, 4),
+            "n_infeas_resolved": n_infeas_resolved,
+            "completion_rate": round(completion_rate, 4),
         },
-        "solve_times": {
-            "avg": sum(solve_times) / len(solve_times),
-            "min": min(solve_times),
-            "max": max(solve_times),
-            "n": len(solve_times),
-            "values": solve_times,
+        "feasibility": {
+            "build_times": summarise(feas_build_times),
+            "solve_times": summarise(feas_solve_times),
+            "num_constraints": int(feas_num_constraints) if feas_num_constraints is not None else None,
+            "num_variables": int(feas_num_variables) if feas_num_variables is not None else None,
         },
-        "num_constraints": int(num_constraints) if num_constraints is not None else None,
-        "num_variables": int(num_variables) if num_variables is not None else None,
+        "pareto": {
+            "build_times": summarise(pareto_build_times),
+            "solve_times": summarise(pareto_solve_times),
+            "solve_all_times": summarise(pareto_solve_all_times),
+            "num_constraints": int(pareto_num_constraints) if pareto_num_constraints is not None else None,
+            "num_variables": int(pareto_num_variables) if pareto_num_variables is not None else None,
+        },
     }
 
-    path = Path(log_dir) / "complexity.json"
+    path = Path(log_dir) / "solve_stats.json"
     with open(path, "w") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"Stats saved to {path}")
-    print(f"  Build: avg={stats['build_times']['avg']:.4f}s, "
-          f"min={stats['build_times']['min']:.4f}s, "
-          f"max={stats['build_times']['max']:.4f}s")
-    print(f"  Solve: avg={stats['solve_times']['avg']:.4f}s, "
-          f"min={stats['solve_times']['min']:.4f}s, "
-          f"max={stats['solve_times']['max']:.4f}s")
+    print(f"\nStats saved to {path}")
+    print(f"  Simulation: {total_tick} steps, "
+          f"{n_infeas} infeasible ({infeas_rate:.1%}), "
+          f"{n_infeas_resolved} resolved, "
+          f"completion {completion_rate:.1%}")
+    s = stats["feasibility"]
+    print(f"  Feasibility:  build {s['build_times']['avg']:.4f}s  "
+          f"solve {s['solve_times']['avg']:.4f}s  "
+          f"({s['solve_times']['n']} calls)")
+    s = stats["pareto"]
+    if s["solve_times"]["n"] > 0:
+        print(f"  Pareto (per MILP): build {s['build_times']['avg']:.4f}s  "
+              f"solve {s['solve_times']['avg']:.4f}s  "
+              f"({s['solve_times']['n']} calls)")
+        print(f"  Pareto (per tick): sweep {s['solve_all_times']['avg']:.4f}s  "
+              f"max {s['solve_all_times']['max']:.4f}s  "
+              f"({s['solve_all_times']['n']} ticks)")
 
 
+def save_pareto_log(pareto_records, log_dir):
+    path = Path(log_dir) / "pareto.json"
+    with open(path, "w") as f:
+        json.dump(pareto_records, f, indent=2)
+    print(f"Pareto log saved to {path} ({len(pareto_records)} ticks)")
+
+    
 def save_trajectories(agent_trajectories, log_dir):
     """Save agent locations to locations.json."""
     path = Path(log_dir) / "trajectory.json"
@@ -140,141 +180,95 @@ def imgs_to_video(log_dir, fps=10):
 # ------------------------------------------------------------------
 # STL robustness
 # ------------------------------------------------------------------
-
-def compute_and_save_robustness(agent_locations, stl_cfg, agent_dims, dt, log_dir):
+def save_robustness_exp1(agent_locations, stl_cfg, dt, log_dir):
     """
-    Compute traditional STL and spatio-temporal robustness for all 5 STL specs:
-    (1) safe distance with pedestrian
-    (2) safe distance with ambulance
-    (3) avoid vehicle rectangle
-    (4) avoid opposite lane rectangle
-    (5) stop before intersection y-line
+    Compute and save STL robustness for three specifications:
+      (1) safe distance with pedestrian  (d_safe box)
+      (2) safe distance with ambulance   (d_safe box)
+      (3) stay in lane                   (x_min <= px <= x_max when y_min <= py <= y_max)
     """
-    ego_locs = np.array(agent_locations["ego_vehicle"])
-    ego_w = agent_dims["ego_vehicle"]["width"]
-    ego_l = agent_dims["ego_vehicle"]["length"]
-    T = len(ego_locs)
+    ego = np.array(agent_locations["ego_vehicle"])
+    T = len(ego)
 
-    min_max = {}
-    spatio_temporal = {}
+    results = {}
 
-    # ------------------------------------------------------------------
-    # (1) (2) Safe distance with pedestrian and ambulance
-    # ------------------------------------------------------------------
+    # (1) (2) safe distance: robustness = max(|dx|, |dy|) - d_safe
+    #         positive = outside the box, negative = inside
     for key in ["pedestrian", "ambulance"]:
         if key not in agent_locations or key not in stl_cfg:
             continue
 
-        d_safe = stl_cfg[key]
-        agent_locs = np.array(agent_locations[key])
-        T_k = min(T, len(agent_locs))
+        agent = np.array(agent_locations[key])
+        d = float(stl_cfg[key])
+        Tk = min(T, len(agent))
 
-        dx = np.abs(ego_locs[:T_k, 0] - agent_locs[:T_k, 0])
-        dy = np.abs(ego_locs[:T_k, 1] - agent_locs[:T_k, 1])
+        dx = np.abs(ego[:Tk, 0] - agent[:Tk, 0])
+        dy = np.abs(ego[:Tk, 1] - agent[:Tk, 1])
+        linf = np.maximum(dx, dy)
+        ro = linf - d
 
-        if key in agent_dims:
-            margin_x = ego_w / 2.0 + agent_dims[key]["width"] / 2.0 + d_safe
-            margin_y = ego_l / 2.0 + agent_dims[key]["length"] / 2.0 + d_safe
-        else:
-            margin_x = ego_w / 2.0 + d_safe
-            margin_y = ego_l / 2.0 + d_safe
-
-        ro_x = np.maximum(dx - margin_x, -d_safe)
-        ro_y = np.maximum(dy - margin_y, -d_safe)
-        ro = np.maximum(ro_x, ro_y)
-
-        min_idx = int(np.argmin(ro))
-        min_max[key] = {"robustness": float(ro[min_idx])}
-
-        violations = np.minimum(ro, 0.0)
-        spatio_temporal[key] = {
-            "robustness": float(np.sum(violations) * dt),
+        results[key] = {
+            "min_robustness": float(np.min(ro)),
             "num_violations": int(np.sum(ro < 0)),
-            "total_steps": int(T),
+            "total_steps": int(Tk),
+            "per_step": ro.tolist(),
         }
 
-    # ------------------------------------------------------------------
-    # (3) Avoid vehicle rectangle
-    # (4) Avoid opposite lane rectangle
-    # ------------------------------------------------------------------
-    for rect_key, label in [("vehicles", "vehicles_rect"), ("lane", "lane_rect")]:
-        if rect_key not in stl_cfg:
-            continue
+    # (3) stay in lane: robustness = min distance to lane boundary (negative = outside)
+    if "lane" in stl_cfg:
+        lane = stl_cfg["lane"]
+        x_min, x_max = float(lane["x_min"]), float(lane["x_max"])
+        y_min, y_max = float(lane["y_min"]), float(lane["y_max"])
 
-        rect = stl_cfg[rect_key]
-        x_min, x_max = rect["x_min"], rect["x_max"]
-        y_min, y_max = rect["y_min"], rect["y_max"]
+        in_y = (ego[:T, 1] >= y_min) & (ego[:T, 1] <= y_max)
+        dx_left = ego[:T, 0] - x_min
+        dx_right = x_max - ego[:T, 0]
 
-        dx_min = ego_locs[:T, 0] - x_min  # distance from left edge
-        dx_max = x_max - ego_locs[:T, 0]  # distance from right edge
-        dy_min = ego_locs[:T, 1] - y_min  # distance from bottom edge
-        dy_max = y_max - ego_locs[:T, 1]  # distance from top edge
+        ro = np.zeros(T)
+        for k in range(T):
+            if not in_y[k]:
+                ro[k] = 1.0  # outside y range, implication vacuously true
+            else:
+                ro[k] = min(dx_left[k], dx_right[k])  # negative = outside lane
 
-        inside_x = np.minimum(dx_min, dx_max)  # min distance to x-edge
-        inside_y = np.minimum(dy_min, dy_max)  # min distance to y-edge
-        penetration = np.minimum(inside_x, inside_y)  # min over both axes
-
-        ro = -penetration
-
-        min_idx = int(np.argmin(ro))
-        min_max[label] = {"robustness": float(ro[min_idx])}
-
-        violations = np.minimum(ro, 0.0)
-        spatio_temporal[label] = {
-            "robustness": float(np.sum(violations) * dt),
+        results["lane"] = {
+            "min_robustness": float(np.min(ro)),
             "num_violations": int(np.sum(ro < 0)),
             "total_steps": int(T),
+            "per_step": ro.tolist(),
         }
 
-    # ------------------------------------------------------------------
-    # (5) Stop before intersection y-line
-    # ------------------------------------------------------------------
-    if "intersection_y" in stl_cfg:
-        y_line = stl_cfg["intersection_y"]
-
-        # robustness: how far ego is from crossing the line
-        # positive = ego is above y_line (safe), negative = crossed
-        ro = ego_locs[:T, 1] - y_line
-
-        min_idx = int(np.argmin(ro))
-        min_max["intersection"] = {"robustness": float(ro[min_idx])}
-
-        violations = np.minimum(ro, 0.0)
-        spatio_temporal["intersection"] = {
-            "robustness": float(np.sum(violations) * dt),
-            "num_violations": int(np.sum(ro < 0)),
-            "total_steps": int(T),
-        }
-
-    # ------------------------------------------------------------------
-    # Save
-    # ------------------------------------------------------------------
-    results = {
-        "min-max": min_max,
-        "spatio-temporal": spatio_temporal,
-    }
-
-    path = Path(log_dir) / "robustness.json"
+    # save
+    path = Path(log_dir) / "robustness_summary.txt"
     with open(path, "w") as f:
-        json.dump(results, f, indent=2)
+        f.write("STL Robustness Summary\n\n")
+
+        f.write(f"{'spec':<15} {'min_rho':>10} {'violations':>12}\n")
+        f.write(f"{'-'*40}\n")
+        for key, r in results.items():
+            status = "pass" if r["min_robustness"] >= 0 else "FAIL"
+            f.write(f"{key:<15} {r['min_robustness']:>+10.3f} "
+                    f"{r['num_violations']:>5}/{r['total_steps']:<5} {status}\n")
+
+        f.write(f"\n\nPer-step robustness\n\n")
+        keys = list(results.keys())
+        header = f"{'step':>6}" + "".join(f"{k:>12}" for k in keys)
+        f.write(header + "\n")
+        f.write("-" * len(header) + "\n")
+
+        max_t = max(len(results[k]["per_step"]) for k in keys)
+        for t in range(max_t):
+            row = f"{t:>6}"
+            for k in keys:
+                steps = results[k]["per_step"]
+                row += f"{steps[t]:>+12.3f}" if t < len(steps) else f"{'':>12}"
+            f.write(row + "\n")
 
     print(f"\nRobustness saved to {path}")
-
-    summary_path = Path(log_dir) / "robustness_summary.txt"
-    with open(summary_path, "w") as f:
-        f.write("STL Robustness Summary\n")
-        f.write(f"  {'spec':<20} {'min-max':>10} {'spatio-temp':>12} {'violations':>12}\n")
-        f.write(f"  {'-'*56}\n")
-        for key in min_max:
-            rho_mm = min_max[key]["robustness"]
-            rho_st = spatio_temporal[key]["robustness"]
-            n_viol = spatio_temporal[key]["num_violations"]
-            total = spatio_temporal[key]["total_steps"]
-            status = "✓" if rho_mm >= 0 else "✗"
-            line = f"  {key:<20} {rho_mm:>+10.3f} {rho_st:>+12.3f} {n_viol:>5}/{total:<5} {status}\n"
-            f.write(line)
-
-    print(f"Summary saved to {summary_path}")
+    for key, r in results.items():
+        status = "pass" if r["min_robustness"] >= 0 else "FAIL"
+        print(f"  {key:<15} min_rho={r['min_robustness']:>+.3f}  "
+              f"violations={r['num_violations']}/{r['total_steps']}  {status}")
 
 
 # ------------------------------------------------------------------

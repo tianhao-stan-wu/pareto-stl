@@ -135,26 +135,5 @@ def stay_in_lane(
     return constraints, delta
 
 
-def clear_intersection(
-    x_var: cp.Variable,
-    y_exit: float,
-    N: int,
-    big_M: float = 200.0,
-    label: str = "clear"
-):
-    """
-    STL: F[0,T](py <= y_exit)
-    """
-    delta_cross = cp.Variable(nonneg=True, name=f"delta_cross_{label}")
-    constraints = []
-
-    z_exit = cp.Variable(N + 1, boolean=True, name=f"z_exit_{label}")
-    constraints.append(cp.sum(z_exit) >= 1)
-
-    for k in range(N + 1):
-        py = x_var[1, k]
-        constraints.append(py <= y_exit + delta_cross + big_M * (1 - z_exit[k]))
-
-    return constraints, delta_cross
 
 

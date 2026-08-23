@@ -79,9 +79,10 @@ def check_feasibility(client, agents, cfg, emergency):
     )
     prob = cp.Problem(objective, cons)
 
-    n_cons = sum(ci.size for ci in cons)
-    n_vars = sum(vi.size for vi in prob.variables())
     t_build = time.perf_counter() - t0
+
+    n_cons = sum(ci.size for ci in cons)
+    n_vars = sum(vi.size for vi in prob.variables()) 
 
     t1 = time.perf_counter()
     prob.solve(solver=cp.GUROBI, env=_ENV, **_GATE_PARAMS)
@@ -91,7 +92,13 @@ def check_feasibility(client, agents, cfg, emergency):
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
         print(f"  [gate] infeasible -> PARETO")
-        return {"status": False}
+        return {
+            "status": False,
+            "t_build": t_build,
+            "t_solve": t_solve,
+            "num_constraints": n_cons,
+            "num_variables": n_vars,
+        }
 
     delta_vals = {k: float(v.value) for k, v in deltas.items() if v.value is not None}
     delta_sum = float(sum(delta_vals.values()))

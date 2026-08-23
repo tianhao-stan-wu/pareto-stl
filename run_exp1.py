@@ -17,7 +17,7 @@ from src.client import Client
 from src.agents import Vehicle, Walker
 from src.utils import (
     set_all_lights_green, setup_logging, setup_camera, save_frame, 
-    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness
+    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness, save_pareto_log
 )
 
 from exp1.mpc import solve_mpc_pareto
@@ -38,16 +38,19 @@ def main():
 
     client = Client(cfg)
     camera, img_queue = setup_camera(client.world, cfg["carla"])
+
+    # set all green for demo
     set_all_lights_green(client.world)
 
-    # spawn agents
+    # spawn key agents
     ego = Vehicle(client.world, cfg, "ego_vehicle")
     amb = Vehicle(client.world, cfg, "ambulance")
     ped = Walker(client.world, cfg, "pedestrian")
     agents = [ego, amb, ped]
 
-    amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
+    # amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
 
+    # spawn other road vehicles 
     v1 = Vehicle(client.world, cfg, "v1")
     v2 = Vehicle(client.world, cfg, "v2")
     v3 = Vehicle(client.world, cfg, "v3")
@@ -64,13 +67,24 @@ def main():
 
     agent_trajectories = {agent.key: [] for agent in agents}
 
-    build_times = []
-    solve_times = []
-    num_constraints = None
-    num_variables = None
+    feas_build_times = []
+    feas_solve_times = []
+    feas_num_constraints = None
+    feas_num_variables = None
+
+    pareto_build_times = []
+    pareto_solve_times = []
+    pareto_solve_all_times = []
+    pareto_num_constraints = None
+    pareto_num_variables = None
+
+    pareto_records = []
 
     tick = 0
     camera_tick = start_tick
+
+    n_infeas = 0
+    n_infeas_resolved = 0
 
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
                    if s in cp.installed_solvers()), None)
@@ -118,20 +132,43 @@ def main():
 
                 emergency = tick >= emergency_tick
        
-                result = check_feasibility(client, agents, cfg, emergency=emergency)
+                feas_result = check_feasibility(client, agents, cfg, emergency=emergency)
+
+                feas_build_times.append(feas_result["t_build"])
+                feas_solve_times.append(feas_result["t_solve"])
+
+                if feas_num_constraints is None:
+                    feas_num_constraints = feas_result["num_constraints"]
+                    feas_num_variables = feas_result["num_variables"]
 
                 # if infeasible
-                if not result["status"]:
-                    result = solve_mpc_pareto(client, agents, cfg, emergency=emergency)
+                if not feas_result["status"]:
 
-                ego.apply_control(result["control"])
+                    n_infeas += 1
 
-                build_times.append(result["t_build"])
-                solve_times.append(result["t_solve"])
-               
-                if num_constraints is None:
-                    num_constraints = result["num_constraints"]
-                    num_variables = result["num_variables"]
+                    pareto_result = solve_mpc_pareto(client, agents, cfg, emergency=emergency)
+
+                    if pareto_result["status"]:
+
+                        n_infeas_resolved += 1
+
+                        pareto_build_times.append(pareto_result["t_build"])
+                        pareto_solve_times.append(pareto_result["t_solve"])
+                        pareto_solve_all_times.append(pareto_result["t_solve_all"])
+
+                        if pareto_num_constraints is None:
+                            pareto_num_constraints = pareto_result["num_constraints"]
+                            pareto_num_variables = pareto_result["num_variables"]
+
+                        pareto_records.append({
+                            "tick": tick,
+                            **pareto_result["pareto_log"],
+                        })
+
+                    ego.apply_control(pareto_result["control"])
+
+                else:
+                    ego.apply_control(feas_result["control"])
 
                 for agent in agents:
                     loc = agent.get_transform().location
@@ -149,7 +186,18 @@ def main():
         camera.destroy()
         client.quit(destroy=True)
 
-        save_stats(build_times, solve_times, num_constraints, num_variables, log_dir)
+        total_tick = end_tick - start_tick
+
+        save_stats(
+            feas_build_times, feas_solve_times, feas_num_constraints, feas_num_variables,
+            pareto_build_times, pareto_solve_times, pareto_solve_all_times,
+            pareto_num_constraints, pareto_num_variables,
+            total_tick, n_infeas, n_infeas_resolved,
+            log_dir,
+        )
+
+        save_pareto_log(pareto_records, log_dir)
+
         save_trajectories(agent_trajectories, log_dir)
         imgs_to_video(log_dir)   
         

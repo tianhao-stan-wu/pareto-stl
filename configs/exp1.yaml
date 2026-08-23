@@ -1,7 +1,7 @@
 # params for initializing the experiment
 
 project:
-  name: "three-agent collision avoidance at intersection"
+  name: "Intersection Pedestrian Crossing"
   seed: 42
   exp: "exp1"
 
@@ -27,8 +27,13 @@ mpc:
   density: 1
 
 stl:
-  pedestrian: 3   
-  ambulance: 5
+  pedestrian: 3.0
+  ambulance: 5.0
+  lane:
+    x_min: -45.5
+    x_max: -44.0
+    y_min: 0
+    y_max: 100
 
 ego_vehicle:
   blueprint: "vehicle.tesla.model3"

@@ -1,7 +1,7 @@
 # params for initializing the experiment
 
 project:
-  name: "multi-agent collision avoidance at highway"
+  name: "Highway Crash Avoidance"
   seed: 42
   exp: "exp2"
 
