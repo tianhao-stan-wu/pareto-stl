@@ -99,7 +99,7 @@ left_vehicle:
   behavior: "aggressive"
   target_speed: 60
   spawn:
-    location: {x: -160.657, y: 8.447, z: 8.040}
+    location: {x: -155.657, y: 8.447, z: 8.040}
     rotation: {pitch: -15.836, yaw: -180.304, roll: -0.000}
   destination:
     location: {x: -280.862, y: 8.375, z: 3.150}

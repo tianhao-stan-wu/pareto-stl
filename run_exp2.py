@@ -137,7 +137,7 @@ def main():
                     left.step(acc=0.8)
                 else:
                     follower.step()
-                    left.step(acc=-0.1, steer=0)
+                    left.step(steer=0)
 
                 emergency = tick >= emergency_tick
                 result = check_feasibility(client, agents, cfg, emergency=emergency)

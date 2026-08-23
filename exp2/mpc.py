@@ -175,7 +175,7 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     follower_prob = follower.sample_trajectories(N, dt, P)
     left_prob = left.sample_trajectories(N, dt, P)
 
-    draw_sample_traj(client.world, leader_stl, color=COLORS["green"], life_time=lt, z=z_ld)
+    # draw_sample_traj(client.world, leader_stl, color=COLORS["green"], life_time=lt, z=z_ld)
     # draw_sample_traj(client.world, follower_stl, color=COLORS["red"], life_time=lt, z=z_f)
     # draw_sample_traj(client.world, left_stl, color=COLORS["yellow"], life_time=lt, z=z_lt)
 
