@@ -184,14 +184,16 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
 
         W = 1e-4
 
+        delta_cost = cp.sum(
+            cp.hstack([deltas[name] for name in deltas])
+        )
+
         smoothness = (
             cp.norm(cp.diff(u[0, :]), 1)       # acceleration rate (jerk)
             + cp.norm(cp.diff(u[1, :]), 1)     # steering rate
-            + cp.norm(cp.diff(x[0, :]), 1)     # position smoothness x
-            + cp.norm(cp.diff(x[1, :]), 1)     # position smoothness y
         )
 
-        objective = cp.Minimize(probs[mode] + W * smoothness)
+        objective = cp.Minimize(probs[mode] + W * smoothness + W * delta_cost)
         prob = cp.Problem(objective, cons)
 
         t_build = time.perf_counter() - t0

@@ -17,7 +17,7 @@ from src.client import Client
 from src.agents import Vehicle, Walker
 from src.utils import (
     set_all_lights_green, setup_logging, setup_camera, save_frame, 
-    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness, save_pareto_log
+    save_stats, save_trajectories, imgs_to_video, save_robustness_exp1, save_pareto_log
 )
 
 from exp1.mpc import solve_mpc_pareto
@@ -207,8 +207,8 @@ def main():
             if hasattr(agent, "width") and hasattr(agent, "length"):
                 agent_dims[agent.key] = {"width": agent.width, "length": agent.length}
 
-        compute_and_save_robustness(
-            agent_trajectories, cfg["stl"], agent_dims, cfg["carla"]["dt"], log_dir
+        save_robustness_exp1(
+            agent_trajectories, cfg["stl"], cfg["carla"]["dt"], log_dir
         )
 
         
