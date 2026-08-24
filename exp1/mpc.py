@@ -13,7 +13,7 @@ from exp1.stl import safe_distance_vehicle, safe_distance_walker, stay_in_lane, 
 _ENV = gp.Env(params={"OutputFlag": 0})
 
 _SOLVER_PARAMS = dict(
-    TimeLimit=10.0, MIPGap=0.0,
+    TimeLimit=15.0, MIPGap=0.0,
     IntFeasTol=1e-7, NumericFocus=2, Presolve=2,
     MIPFocus=1, Heuristics=0.1, Cuts=2,
     Threads=4, Seed=0,
@@ -123,6 +123,9 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     ped_prob = ped.sample_trajectories(N, dt, P)
     amb_prob = amb.sample_trajectories(N, dt, P)
 
+    # draw_sample_traj(client.world, ped_prob, color=COLORS["green"], life_time=lt)
+    # draw_sample_traj(client.world, amb_prob, color=COLORS["red"], life_time=lt)
+
     # epsilon grid over [0, 1]
     eps_grid = np.linspace(0, 1, density + 1)[1:]
 
@@ -182,7 +185,9 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         for name, eps_val in eps_dict.items():
             cons.append(probs[name] <= float(eps_val))
 
-        W = 1e-4
+        ws = 1e-4
+        wd = 1e-2
+        wp = 1e-6 
 
         delta_cost = cp.sum(
             cp.hstack([deltas[name] for name in deltas])
@@ -191,9 +196,11 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         smoothness = (
             cp.norm(cp.diff(u[0, :]), 1)       # acceleration rate (jerk)
             + cp.norm(cp.diff(u[1, :]), 1)     # steering rate
-        )
+        )       
 
-        objective = cp.Minimize(probs[mode] + W * smoothness + W * delta_cost)
+        all_probs = sum(probs.values())
+
+        objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost + wp * all_probs)
         prob = cp.Problem(objective, cons)
 
         t_build = time.perf_counter() - t0
@@ -275,6 +282,7 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     print(f"  Best [{best['mode']}]: "
           f"p=({best['p_ped']:.3f}, {best['p_amb']:.3f})  "
           f"deltas={best['deltas']}")
+    print()
 
     # record all points for later plotting
     best_idx = next(i for i in range(len(results)) if results[i] is best)

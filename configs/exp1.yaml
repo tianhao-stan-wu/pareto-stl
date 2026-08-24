@@ -19,9 +19,9 @@ carla:
 mpc:
   horizon: 2             
   num_samples: 30
-  num_prob: 30        
-  sim_start: 4
-  emergency_start: 5     
+  num_prob: 15        
+  sim_start: 5
+  emergency_start: 6     
   sim_end: 10
   type: "pareto"
   density: 5
@@ -42,7 +42,7 @@ ego_vehicle:
   behavior: "normal"
   target_speed: 40
   spawn:
-    location: {x: -45.214, y: 80.322, z: 0.5}
+    location: {x: -45.214, y: 90.322, z: 0.5}
     rotation: {pitch: -2.933, yaw: -87.606, roll: 0.000}
   destination:
     location: {x: -45.214, y: -3.398, z: 1}
@@ -61,9 +61,9 @@ ambulance:
   autopilot: True
   draw_route: False
   behavior: "aggressive"
-  target_speed: 30
+  target_speed: 40
   spawn:
-    location: {x: -45.146, y: 90.043, z: 2.194}
+    location: {x: -45.146, y: 100.043, z: 2.194}
     rotation: {pitch: -5.294, yaw: -89.380, roll: 0.000}
   destination:
     location: {x: -45.654, y: 3.146, z: 2.324}
@@ -75,7 +75,7 @@ ambulance:
   beta_max: 0.133
   width: 2.35   
   length: 6.37 
-  std_acc: 0.5
+  std_acc: 1
   std_steer: 0.05
   warmup: 1
   proximity_threshold: 5
@@ -85,9 +85,9 @@ pedestrian:
   spawn:
     location: {x: -22.011, y: 36.775, z: 1.640}
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
-  mean_speed: 4.5
-  std_speed: 1
-  std_dir: 0.15
+  mean_speed: 4
+  std_speed: 3
+  std_dir: 0.1
 
 # other road vehicles
 v1:
@@ -113,7 +113,7 @@ v2:
     location: {x: -48.752, y: 57.217, z: 1.398}
     rotation: {pitch: -6.564, yaw: 87.010, roll: 0.000}
   destination:
-    location: {x: -48.897, y: 107.022, z: 1.828}
+    location: {x: -48.897, y: 120.022, z: 1.828}
     rotation: {pitch: -0.680, yaw: 86.374, roll: 0.000}
 
 v3:

@@ -36,9 +36,6 @@ def check_feasibility(client, agents, cfg, emergency):
     ped_trajs = ped.sample_trajectories(N, dt, S)
     amb_trajs = amb.sample_trajectories(N, dt, S)
 
-    draw_sample_traj(client.world, ped_trajs, color=COLORS["red"], life_time=lt)
-    draw_sample_traj(client.world, amb_trajs, color=COLORS["green"], life_time=lt)
-
     t0 = time.perf_counter()
 
     x = cp.Variable((4, N + 1), name="x")
@@ -67,9 +64,22 @@ def check_feasibility(client, agents, cfg, emergency):
     cons += [d_amb_stl <= 0]
     deltas["amb"] = d_amb_stl
 
-    c_lane, d_lane = stay_in_lane(x, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
+    # check if ego is currently in the lane
+    px0, py0 = x0[0], x0[1]
+    x_min, x_max = -45.5, -44.0
+    y_min, y_max = 0, 100
+
+    in_lane = (x_min <= px0 <= x_max) or not (y_min <= py0 <= y_max)
+
+    c_lane, d_lane = stay_in_lane(x, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max, N=N)
     cons += c_lane
-    cons += [d_lane <= 0]
+
+    if in_lane:
+        cons += [d_lane <= 0]
+    else:
+        lane_gap = max(x_min - px0, px0 - x_max, 0.0)
+        cons += [d_lane <= lane_gap]
+
     deltas["lane"] = d_lane
 
     # objective: track nominal, no slack term
@@ -107,6 +117,7 @@ def check_feasibility(client, agents, cfg, emergency):
     for k, v in delta_vals.items():
         print(f"         {k:8s}: {v:.6f}")
     print(f"  [gate] -> {'NOMINAL' if delta_sum <= DELTA_TOL else 'PARETO'}")
+    print()
 
     draw_sample_traj(client.world, x.value[:2, :].T, color=COLORS["blue"], life_time=lt)
 
