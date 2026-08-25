@@ -80,6 +80,8 @@ def main():
 
     pareto_records = []
 
+    u_prev = None
+
     tick = 0
     camera_tick = start_tick
 
@@ -132,7 +134,7 @@ def main():
 
                 emergency = tick >= emergency_tick
        
-                feas_result = check_feasibility(client, agents, cfg, emergency=emergency)
+                feas_result = check_feasibility(client, agents, cfg, emergency=emergency, u_prev=u_prev)
 
                 feas_build_times.append(feas_result["t_build"])
                 feas_solve_times.append(feas_result["t_solve"])
@@ -146,7 +148,7 @@ def main():
 
                     n_infeas += 1
 
-                    pareto_result = solve_mpc_pareto(client, agents, cfg, emergency=emergency)
+                    pareto_result = solve_mpc_pareto(client, agents, cfg, emergency=emergency, u_prev=u_prev)
 
                     if pareto_result["status"]:
 
@@ -167,8 +169,12 @@ def main():
 
                     ego.apply_control(pareto_result["control"])
 
+                    u_prev = pareto_result["u_applied"]
+
                 else:
                     ego.apply_control(feas_result["control"])
+
+                    u_prev = feas_result["u_applied"]
 
                 for agent in agents:
                     loc = agent.get_transform().location

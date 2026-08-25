@@ -30,22 +30,44 @@ def ego_state(ego):
     ])
 
 
-def build_nominal(ego, dt, N, x0):
+def build_nominal(ego, dt, N, x0, u_prev=None):
+    """
+    Build nominal trajectory for linearisation.
+    
+    Uses the previously applied control (not run_step) to avoid advancing
+    the planner. If ego is outside the lane, steers the nominal back toward
+    the lane centre so the linearisation point stays in a feasible region.
+    """
     model = KinematicBicycle(lr=ego.lr, dt=dt)
-    ctrl = ego.agent.run_step()
-    a0, _ = carla_to_bicycle(ctrl, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
+
+    # use previous control if available, otherwise coast (no accel, no steer)
+    if u_prev is not None:
+        a_nom, beta_nom = u_prev
+    else:
+        a_nom, beta_nom = 0.0, 0.0
+
+    # lane centre for correction (same values used in STL)
+    lane_cx = (-45.5 + -44.0) / 2.0   # -44.75
+    lane_w  = (-44.0 - -45.5) / 2.0   #   0.75
 
     U = np.zeros((N, 2))
-    for k in range(N):
-        U[k] = [a0, 0.0]
-
     X = np.zeros((N + 1, 4))
     X[0] = x0.copy()
-    A_list, B_list, c_list = [], [], []
 
     for k in range(N):
-        A, B = model.linearize(X[k], U[k])
+        # steer nominal back toward lane centre if drifting out
+        x_err = lane_cx - X[k, 0]
+        if abs(x_err) > lane_w:
+            beta_corr = np.clip(0.5 * x_err, ego.beta_min, ego.beta_max)
+        else:
+            beta_corr = beta_nom
+
+        U[k] = [a_nom, beta_corr]
         X[k + 1] = model.step(X[k], U[k])
+
+    A_list, B_list, c_list = [], [], []
+    for k in range(N):
+        A, B = model.linearize(X[k], U[k])
         c = X[k + 1] - A @ X[k] - B @ U[k]
         A_list.append(A)
         B_list.append(B)
@@ -97,7 +119,7 @@ def pareto_filter(pts):
     return mask
 
 
-def solve_mpc_pareto(client, agents, cfg, emergency):
+def solve_mpc_pareto(client, agents, cfg, emergency, u_prev):
 
     # config
     T_sim = cfg["mpc"]["horizon"]
@@ -168,7 +190,7 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
 
         c_lane, d_lane = stay_in_lane(x, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
         cons += c_lane
-        cons += [d_lane <= 3]
+        cons += [d_lane <= 4]
         deltas["lane"] = d_lane
 
         # probability encoding
@@ -200,7 +222,11 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
 
         all_probs = sum(probs.values())
 
-        objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost + wp * all_probs)
+        cost = ws * cp.norm(x - X_nom.T, 1) + ws * smoothness
+
+        # objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost + wp * all_probs)
+        # objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost)
+        objective = cp.Minimize(probs[mode] + cost)
         prob = cp.Problem(objective, cons)
 
         t_build = time.perf_counter() - t0
@@ -261,6 +287,7 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         return {
             "status": False,
             "control": carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0),
+            "u_applied": None,
         }
 
     # pareto filter
@@ -301,4 +328,5 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             "pareto_mask": mask.tolist(),
             "selected_idx": int(best_idx),
         },
+        "u_applied": [a_opt, beta_opt],
     }

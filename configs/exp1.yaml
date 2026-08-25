@@ -87,7 +87,7 @@ pedestrian:
     rotation: {pitch: -8.565, yaw: 178.503, roll: 0.000}
   mean_speed: 4
   std_speed: 3
-  std_dir: 0.1
+  std_dir: 0.05
 
 # other road vehicles
 v1:

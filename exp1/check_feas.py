@@ -15,7 +15,7 @@ _GATE_PARAMS = dict(
 DELTA_TOL = 1e-5
 
 
-def check_feasibility(client, agents, cfg, emergency):
+def check_feasibility(client, agents, cfg, emergency, u_prev):
 
     # config
     S = cfg["mpc"]["num_samples"]
@@ -64,22 +64,9 @@ def check_feasibility(client, agents, cfg, emergency):
     cons += [d_amb_stl <= 0]
     deltas["amb"] = d_amb_stl
 
-    # check if ego is currently in the lane
-    px0, py0 = x0[0], x0[1]
-    x_min, x_max = -45.5, -44.0
-    y_min, y_max = 0, 100
-
-    in_lane = (x_min <= px0 <= x_max) or not (y_min <= py0 <= y_max)
-
-    c_lane, d_lane = stay_in_lane(x, x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max, N=N)
+    c_lane, d_lane = stay_in_lane(x, x_min=-45.5, x_max=-44, y_min=0, y_max=100, N=N)
     cons += c_lane
-
-    if in_lane:
-        cons += [d_lane <= 0]
-    else:
-        lane_gap = max(x_min - px0, px0 - x_max, 0.0)
-        cons += [d_lane <= lane_gap]
-
+    cons += [d_lane <= 0]
     deltas["lane"] = d_lane
 
     # objective: track nominal, no slack term
@@ -134,6 +121,7 @@ def check_feasibility(client, agents, cfg, emergency):
         "t_solve": t_solve,
         "num_constraints": n_cons,
         "num_variables": n_vars,
+        "u_applied": [a_opt, beta_opt],
     }
 
     
