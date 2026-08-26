@@ -18,11 +18,17 @@ from src.agents import Vehicle, Walker
 from src.utils import (
     set_all_lights_green, setup_logging, setup_camera, save_frame,
     save_stats, save_trajectories, imgs_to_video, save_pareto_log,
-    save_robustness_exp2,
+    save_robustness_exp2, save_theorem1_results
 )
 
 from exp2.mpc import solve_mpc_pareto
 from exp2.check_feas import check_feasibility
+from exp2.theorem1 import (
+    verify_theorem1,
+    summarise_theorem1,
+    make_exp2_joint_sampler,
+    make_exp2_satisfaction_checker,
+)
 
 
 def main():
@@ -75,6 +81,14 @@ def main():
     pareto_num_variables = None
 
     pareto_records = []
+
+    theorem1_cfg = cfg.get("theorem1", {})
+    theorem1_enabled = bool(theorem1_cfg.get("enabled", True))
+    theorem1_eps = float(theorem1_cfg.get("eps", 0.05))
+    theorem1_beta = float(theorem1_cfg.get("beta", 0.05))
+    theorem1_N_approx = int(theorem1_cfg.get("N_approx", 10000))
+    theorem1_records = []
+
     u_prev = None
 
     tick = 0
@@ -173,6 +187,42 @@ def main():
                     feas_num_constraints = feas_result["num_constraints"]
                     feas_num_variables = feas_result["num_variables"]
 
+                # Theorem 1 validation: only strict-feasible solutions are tested.
+                if feas_result["status"] and theorem1_enabled:
+                    N = int(round(cfg["mpc"]["horizon"] / dt))
+                    sampler = make_exp2_joint_sampler(
+                        leader, follower, left, ped2, N, dt
+                    )
+                    satisfies = make_exp2_satisfaction_checker(
+                        cfg["stl"], emergency
+                    )
+                    theorem_result = verify_theorem1(
+                        feas_result["u_star"],
+                        feas_result["x_star"],
+                        sampler,
+                        satisfies,
+                        theorem1_eps,
+                        theorem1_beta,
+                        N_approx=theorem1_N_approx,
+                    )
+                    theorem_result["tick"] = int(tick)
+                    theorem_result["emergency"] = bool(emergency)
+                    theorem1_records.append(theorem_result)
+
+                    if theorem_result["validated"]:
+                        p_hat = theorem_result["p_viol_hat"]
+                        verdict = "<= eps" if p_hat <= theorem1_eps else "> eps"
+                        print(
+                            f"  [Theorem 1] tick={tick}: VALIDATED "
+                            f"(M={theorem_result['M']}), "
+                            f"p_viol_hat={p_hat:.4f} ({verdict})"
+                        )
+                    else:
+                        print(
+                            f"  [Theorem 1] tick={tick}: validation FAILED "
+                            f"({theorem_result['validation_failures']}/{theorem_result['M']})"
+                        )
+
                 if not feas_result["status"]:
 
                     n_infeas += 1
@@ -236,6 +286,10 @@ def main():
         )
 
         save_pareto_log(pareto_records, log_dir)
+
+        theorem1_summary = summarise_theorem1(theorem1_records)
+        save_theorem1_results(theorem1_records, theorem1_summary, log_dir)
+
         save_trajectories(agent_trajectories, log_dir)
         imgs_to_video(log_dir)
 

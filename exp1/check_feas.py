@@ -95,6 +95,8 @@ def check_feasibility(client, agents, cfg, emergency, u_prev):
             "t_solve": t_solve,
             "num_constraints": n_cons,
             "num_variables": n_vars,
+            "x_star": None,
+            "u_star": None,
         }
 
     delta_vals = {k: float(v.value) for k, v in deltas.items() if v.value is not None}
@@ -122,6 +124,8 @@ def check_feasibility(client, agents, cfg, emergency, u_prev):
         "num_constraints": n_cons,
         "num_variables": n_vars,
         "u_applied": [a_opt, beta_opt],
+        "x_star": np.array(x.value, dtype=float),
+        "u_star": np.array(u.value, dtype=float),
     }
 
     

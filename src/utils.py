@@ -384,6 +384,27 @@ def save_robustness_exp2(agent_locations, stl_cfg, dt, log_dir):
               f"violations={r['num_violations']}/{r['total_steps']}  {status}")
 
 
+def save_theorem1_results(records, summary, log_dir):
+    """Save per-tick and aggregate Theorem 1 verification results."""
+    from pathlib import Path
+    import json
+
+    path = Path(log_dir) / "theorem1_validation.json"
+
+    output = {
+        "summary": summary,
+        "records": records,
+    }
+
+    with open(path, "w") as f:
+        json.dump(output, f, indent=2)
+
+    print(f"\nTheorem 1 validation saved to {path}")
+
+    # Print exactly what summarise_theorem1() produced.
+    for key, value in summary.items():
+        print(f"  {key}: {value}")
+        
 # ------------------------------------------------------------------
 # mpc
 # ------------------------------------------------------------------

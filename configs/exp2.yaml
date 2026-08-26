@@ -26,6 +26,12 @@ mpc:
   type: "pareto"
   density: 2
 
+theorem1:
+  enabled: true
+  eps: 0.05
+  beta: 0.05
+  N_approx: 10000
+
 stl:
   d_safe_x: 5.0
   d_safe_y: 3.0

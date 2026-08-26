@@ -143,9 +143,9 @@ def solve_mpc_pareto(client, agents, cfg, emergency, u_prev=None):
     left_prob = left.sample_trajectories(N, dt, P)
     ped2_prob = ped2.sample_trajectories(N, dt, P)
 
-    draw_sample_traj(client.world, ped2_prob, color=COLORS["green"], life_time=lt, z=z_ego)
-    draw_sample_traj(client.world, left_prob, color=COLORS["red"], life_time=lt, z=z_ego)
-    draw_sample_traj(client.world, follower_prob, color=COLORS["red"], life_time=lt, z=z_ego)
+    # draw_sample_traj(client.world, ped2_prob, color=COLORS["green"], life_time=lt, z=z_ego)
+    # draw_sample_traj(client.world, left_prob, color=COLORS["red"], life_time=lt, z=z_ego)
+    # draw_sample_traj(client.world, follower_prob, color=COLORS["red"], life_time=lt, z=z_ego)
 
     # epsilon grid: uniform for all three objectives
     eps_grid = np.linspace(0, 1, density + 1)[1:]

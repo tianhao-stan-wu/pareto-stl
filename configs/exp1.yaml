@@ -26,6 +26,12 @@ mpc:
   type: "pareto"
   density: 5
 
+theorem1:
+  enabled: true
+  eps: 0.05
+  beta: 0.05
+  N_approx: 10000
+  
 stl:
   pedestrian: 3.0
   ambulance: 5.0
