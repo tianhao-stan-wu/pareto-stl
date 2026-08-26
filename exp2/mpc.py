@@ -9,7 +9,7 @@ import gurobipy as gp
 from src.bicycle import KinematicBicycle
 from src.utils import draw_sample_traj, bicycle_to_carla, carla_to_bicycle, COLORS
 from exp2.stl import (
-    safe_distance_vehicle, stay_in_lane,
+    safe_distance_vehicle, safe_distance_walker, stay_in_lane,
     bounded_deceleration, bounded_steering_rate, safe_distance_box,
     _promote,
 )
@@ -34,22 +34,28 @@ def ego_state(ego):
     ])
 
 
-def build_nominal(ego, dt, N, x0):
+def build_nominal(ego, dt, N, x0, u_prev=None):
     model = KinematicBicycle(lr=ego.lr, dt=dt)
-    ctrl = ego.agent.run_step()
-    a0, _ = carla_to_bicycle(ctrl, ego.acc_min, ego.acc_max, ego.beta_min, ego.beta_max)
+
+    # use previous acceleration, but always zero steering
+    a_nom = u_prev[0] if u_prev is not None else 0.0
 
     U = np.zeros((N, 2))
-    for k in range(N):
-        U[k] = [a0, 0.0]
-
     X = np.zeros((N + 1, 4))
     X[0] = x0.copy()
-    A_list, B_list, c_list = [], [], []
+    ROAD_YAW = math.radians(-180.0)   # −π, heading in −x direction
+    LANE_Y   = 5.5
+
+    X[0, 1] = LANE_Y
+    X[0, 2] = ROAD_YAW
 
     for k in range(N):
-        A, B = model.linearize(X[k], U[k])
+        U[k] = [a_nom, 0.0]
         X[k + 1] = model.step(X[k], U[k])
+
+    A_list, B_list, c_list = [], [], []
+    for k in range(N):
+        A, B = model.linearize(X[k], U[k])
         c = X[k + 1] - A @ X[k] - B @ U[k]
         A_list.append(A)
         B_list.append(B)
@@ -59,9 +65,6 @@ def build_nominal(ego, dt, N, x0):
 
 
 def encode_collision_vehicle(x_var, trajs, d_safe_x, d_safe_y, label, M=500):
-    """
-    P = (1/K) * sum(z_n). Rectangular keep-out box with separate x/y margins.
-    """
     K, T, _ = trajs.shape
 
     pp = cp.Variable((K, T), boolean=True, name=f"pp_{label}")
@@ -89,37 +92,6 @@ def encode_collision_vehicle(x_var, trajs, d_safe_x, d_safe_y, label, M=500):
     return z, prob, cons
 
 
-def encode_collision_box(x_var, x_min, x_max, y_min, y_max, d_safe, label, M=500):
-    """
-    P = z (0 or 1). Ego enters the inflated static box at any step -> z = 1.
-    """
-    lx, ux = x_min - d_safe, x_max + d_safe
-    ly, uy = y_min - d_safe, y_max + d_safe
-    T = x_var.shape[1]
-
-    pp = cp.Variable(T, boolean=True, name=f"pp_{label}")
-    pn = cp.Variable(T, boolean=True, name=f"pn_{label}")
-    qp = cp.Variable(T, boolean=True, name=f"qp_{label}")
-    qn = cp.Variable(T, boolean=True, name=f"qn_{label}")
-    z = cp.Variable(1, boolean=True, name=f"z_{label}")
-
-    cons = []
-    for k in range(T):
-        px = x_var[0, k]
-        py = x_var[1, k]
-
-        cons += [
-            px <= lx + M * (1 - pp[k]),
-            px >= ux - M * (1 - pn[k]),
-            py <= ly + M * (1 - qp[k]),
-            py >= uy - M * (1 - qn[k]),
-            z[0] >= 1 - pp[k] - pn[k] - qp[k] - qn[k],
-        ]
-
-    prob = z[0]  # 0 or 1
-    return z, prob, cons
-
-
 def pareto_filter(pts):
     n = len(pts)
     mask = np.ones(n, dtype=bool)
@@ -131,9 +103,8 @@ def pareto_filter(pts):
     return mask
 
 
-def solve_mpc_pareto(client, agents, cfg, emergency):
+def solve_mpc_pareto(client, agents, cfg, emergency, u_prev=None):
 
-    # config
     T_sim = cfg["mpc"]["horizon"]
     S = cfg["mpc"]["num_samples"]
     P = cfg["mpc"]["num_prob"]
@@ -145,6 +116,7 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     d_safe_x = float(cfg["stl"]["d_safe_x"])
     d_safe_y = float(cfg["stl"]["d_safe_y"])
     d_crash = float(cfg["stl"]["d_crash"])
+    d_ped = float(cfg["stl"]["d_ped"])
     a_comfort = float(cfg["stl"]["a_comfort"])
     beta_rate = float(cfg["stl"]["beta_rate_max"])
 
@@ -155,38 +127,38 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         "y_max": float(cfg["stl"]["crash_y_max"]),
     }
 
-    ego, leader, follower, left = agents[0], agents[1], agents[2], agents[3]
-
+    ego, leader, follower, left, ped2 = agents[0], agents[1], agents[2], agents[3], agents[4]
     z_ego = ego.get_transform().location.z
-    z_ld = leader.get_transform().location.z
-    z_f = follower.get_transform().location.z
-    z_lt = left.get_transform().location.z
 
-    # nominal trajectory
     x0 = ego_state(ego)
-    X_nom, U_nom, A, B, c = build_nominal(ego, dt, N, x0)
+    X_nom, U_nom, A, B, c = build_nominal(ego, dt, N, x0, u_prev=u_prev)
 
-    # sample trajectories
-    leader_stl = leader.sample_trajectories(N, dt, S)
+    # sample trajectories for STL
     follower_stl = follower.sample_trajectories(N, dt, S)
     left_stl = left.sample_trajectories(N, dt, S)
+    ped2_stl = ped2.sample_trajectories(N, dt, S)
 
-    leader_prob = leader.sample_trajectories(N, dt, P)
+    # sample trajectories for probability encoding
     follower_prob = follower.sample_trajectories(N, dt, P)
     left_prob = left.sample_trajectories(N, dt, P)
+    ped2_prob = ped2.sample_trajectories(N, dt, P)
 
-    # draw_sample_traj(client.world, leader_stl, color=COLORS["green"], life_time=lt, z=z_ld)
-    # draw_sample_traj(client.world, follower_stl, color=COLORS["red"], life_time=lt, z=z_f)
-    # draw_sample_traj(client.world, left_stl, color=COLORS["yellow"], life_time=lt, z=z_lt)
+    draw_sample_traj(client.world, ped2_prob, color=COLORS["green"], life_time=lt, z=z_ego)
+    draw_sample_traj(client.world, left_prob, color=COLORS["red"], life_time=lt, z=z_ego)
+    draw_sample_traj(client.world, follower_prob, color=COLORS["red"], life_time=lt, z=z_ego)
 
-    # epsilon grids
-    # vehicles: uniform over (0, 1]
-    eps_veh = np.linspace(0, 1, density + 1)[1:]
-    # crash: only two values — 0.5 means "no collision", 1.0 means "allow collision"
-    eps_crash = [0.5, 1.0]
+    # epsilon grid: uniform for all three objectives
+    eps_grid = np.linspace(0, 1, density + 1)[1:]
 
-    # four objectives, each mode minimises one and constrains the other three
-    modes = ["leader", "follower", "left", "crash"]
+    modes = ["follower", "left", "ped2"]
+
+    free_axes = {
+        "follower": ["left", "ped2"],
+        "left": ["follower", "ped2"],
+        "ped2": ["follower", "left"],
+    }
+
+    t_sweep_start = time.perf_counter()
 
     def solve_one(mode, eps_dict, warm=None):
 
@@ -196,7 +168,6 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         u = cp.Variable((2, N), name="u")
         cons = [x[:, 0] == x0]
 
-        # dynamics and control bounds
         for k in range(N):
             cons += [
                 x[:, k+1] == A[k] @ x[:, k] + B[k] @ u[:, k] + c[k],
@@ -204,15 +175,15 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
                 u[1, k] >= ego.beta_min, u[1, k] <= ego.beta_max,
             ]
 
-        # STL constraints (always active)
         deltas = {}
 
+        # always: lane, deceleration, steering rate
         c_lane, d_lane = stay_in_lane(
             x, x_min=cfg["stl"]["x_min"], x_max=cfg["stl"]["x_max"],
             y_min=cfg["stl"]["y_min"], y_max=cfg["stl"]["y_max"], N=N,
         )
         cons += c_lane
-        cons += [d_lane <= 3]
+        cons += [d_lane <= 2.5]
         deltas["lane"] = d_lane
 
         c_dec, d_dec = bounded_deceleration(u, a_comfort, N)
@@ -223,36 +194,30 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         cons += c_sr
         deltas["steer"] = d_sr
 
-        # leader
-        c_ld, dx_ld, dy_ld = safe_distance_vehicle(
-            x, leader_stl, d_safe_x, d_safe_y, label="leader")
-        cons += c_ld
-        cons += [dx_ld <= d_safe_x]
-        cons += [dy_ld <= d_safe_y]
-        deltas["leader_x"] = dx_ld
-        deltas["leader_y"] = dy_ld
-
-        # follower
+        # always: follower
         c_f, dx_f, dy_f = safe_distance_vehicle(
             x, follower_stl, d_safe_x, d_safe_y, label="follower")
         cons += c_f
-        cons += [dx_f <= d_safe_x]
-        cons += [dy_f <= d_safe_y]
+        cons += [dx_f <= d_safe_x, dy_f <= d_safe_y]
         deltas["follower_x"] = dx_f
         deltas["follower_y"] = dy_f
 
         if emergency:
-
-            # left
+            # left vehicle
             c_l, dx_l, dy_l = safe_distance_vehicle(
                 x, left_stl, d_safe_x, d_safe_y, label="left")
             cons += c_l
-            cons += [dx_l <= d_safe_x]
-            cons += [dy_l <= d_safe_y]
+            cons += [dx_l <= d_safe_x, dy_l <= d_safe_y]
             deltas["left_x"] = dx_l
             deltas["left_y"] = dy_l
 
-            # crash scene box
+            # ped2
+            c_p, d_p = safe_distance_walker(x, ped2_stl, d_ped, label="ped2")
+            cons += c_p
+            cons += [d_p <= d_ped]
+            deltas["ped2"] = d_p
+
+            # crash scene box (STL only, no probability objective)
             c_cr, d_cr = safe_distance_box(
                 x, crash_box["x_min"], crash_box["x_max"],
                 crash_box["y_min"], crash_box["y_max"], d_crash,
@@ -261,48 +226,49 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             cons += [d_cr <= d_crash]
             deltas["crash"] = d_cr
 
-        # probability encoding — vehicles
-        z_ld, p_leader, c_pld = encode_collision_vehicle(
-            x, leader_prob, d_safe_x, d_safe_y, "p_leader")
+        # probability encoding: follower, left, ped2
         z_fo, p_follower, c_pfo = encode_collision_vehicle(
             x, follower_prob, d_safe_x, d_safe_y, "p_follower")
         z_le, p_left, c_ple = encode_collision_vehicle(
             x, left_prob, d_safe_x, d_safe_y, "p_left")
-        cons += c_pld + c_pfo + c_ple
-
-        # probability encoding — crash scene box
-        z_cr, p_crash, c_pcr = encode_collision_box(
-            x, crash_box["x_min"], crash_box["x_max"],
-            crash_box["y_min"], crash_box["y_max"], d_crash, "p_crash",
-        )
-        cons += c_pcr
+        z_pe, p_ped2, c_ppe = encode_collision_vehicle(
+            x, ped2_prob, d_ped, d_ped, "p_ped2")
+        cons += c_pfo + c_ple + c_ppe
 
         probs = {
-            "leader": p_leader,
             "follower": p_follower,
             "left": p_left,
-            "crash": p_crash,
+            "ped2": p_ped2,
         }
 
-        # epsilon constraints on non-minimised objectives
         for name, eps_val in eps_dict.items():
             cons.append(probs[name] <= float(eps_val))
 
-        # objective
-        W = 1e-4
-        smoothness = (
-            cp.norm(cp.diff(u[0, :]), 1)
-            + cp.norm(cp.diff(u[1, :]), 1)
-            + cp.norm(cp.diff(x[0, :]), 1)
-            + cp.norm(cp.diff(x[1, :]), 1)
-        )
-        objective = cp.Minimize(probs[mode] + W * smoothness)
+        ws = 1e-4
+        wd = 1e-2
+        wp = 1e-6 
 
+        delta_cost = cp.sum(
+            cp.hstack([deltas[name] for name in deltas])
+        )
+
+        smoothness = (
+            cp.norm(cp.diff(u[0, :]), 1)       # acceleration rate (jerk)
+            + cp.norm(cp.diff(u[1, :]), 1)     # steering rate
+        )       
+
+        all_probs = sum(probs.values())
+
+        cost = ws * smoothness
+
+        # objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost + wp * all_probs)
+        # objective = cp.Minimize(probs[mode] + ws * smoothness + wd * delta_cost)
+        objective = cp.Minimize(probs[mode] + cost)
         prob = cp.Problem(objective, cons)
 
+        t_build = time.perf_counter() - t0
         n_cons = sum(ci.size for ci in cons)
         n_vars = sum(vi.size for vi in prob.variables())
-        t_build = time.perf_counter() - t0
 
         t1 = time.perf_counter()
         if warm is not None:
@@ -322,10 +288,9 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             "mode": mode,
             "x_opt": x.value,
             "u_opt": u.value,
-            "p_leader": float(p_leader.value),
             "p_follower": float(p_follower.value),
             "p_left": float(p_left.value),
-            "p_crash": float(p_crash.value),
+            "p_ped2": float(p_ped2.value),
             "deltas": {k: float(v.value) for k, v in deltas.items() if v.value is not None},
             "t_build": t_build,
             "t_solve": t_solve,
@@ -333,20 +298,14 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             "num_variables": n_vars,
         }
 
-    # epsilon-constraint sweep
-    # for each mode, build the grid over the other three axes:
-    #   vehicle axes -> eps_veh (uniform)
-    #   crash axis   -> eps_crash ([0.5, 1.0])
+    # epsilon-constraint sweep: 3 modes x density^2
     results = []
-    for mode in modes:
-        other = [m for m in modes if m != mode]
-        grids = [eps_crash if ax == "crash" else eps_veh for ax in other]
-        combos = list(itertools.product(*grids))
-
+    for mode, axes in free_axes.items():
+        combos = list(itertools.product(eps_grid, repeat=len(axes)))
         print(f"\n  -- min p_{mode}  ({len(combos)} grid pts) --")
         warm = None
         for combo in combos:
-            eps_dict = dict(zip(other, combo))
+            eps_dict = dict(zip(axes, combo))
             tag = "  ".join(f"{k}={v:.2f}" for k, v in eps_dict.items())
             print(f"    {tag}")
             sol = solve_one(mode, eps_dict, warm=warm)
@@ -355,23 +314,22 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
             else:
                 warm = sol
                 results.append(sol)
-                print(f"    p=({sol['p_leader']:.3f}, {sol['p_follower']:.3f}, "
-                      f"{sol['p_left']:.3f}, {sol['p_crash']:.3f})")
+                print(f"    p=({sol['p_follower']:.3f}, {sol['p_left']:.3f}, "
+                      f"{sol['p_ped2']:.3f})")
 
-    # fallback
+    t_solve_all = time.perf_counter() - t_sweep_start
+
     if not results:
         print("  All infeasible -- emergency braking.")
         return {
             "status": False,
             "control": carla.VehicleControl(throttle=0.0, brake=0.5, steer=0.0),
-            "deltas": None,
-            "t_build": 0.0, "t_solve": 0.0,
-            "num_constraints": None, "num_variables": None,
+            "u_applied": None,
         }
 
-    # pareto filter over four objectives
+    # pareto filter over three objectives
     pts = np.array([
-        [r["p_leader"], r["p_follower"], r["p_left"], r["p_crash"]]
+        [r["p_follower"], r["p_left"], r["p_ped2"]]
         for r in results
     ])
     mask = pareto_filter(pts)
@@ -380,8 +338,8 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
 
     best = min(pareto, key=lambda r: np.linalg.norm(r["u_opt"][:, 0] - U_nom[0]))
 
-    # draw and apply
-    draw_sample_traj(client.world, best["x_opt"][:2, :].T, color=COLORS["blue"], life_time=lt, z=z_ego)
+    draw_sample_traj(client.world, best["x_opt"][:2, :].T,
+                     color=COLORS["blue"], life_time=lt, z=z_ego)
 
     a_opt, beta_opt = best["u_opt"][:, 0]
     control = bicycle_to_carla(
@@ -389,9 +347,11 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
     )
 
     print(f"  Best [{best['mode']}]: "
-          f"p=({best['p_leader']:.3f}, {best['p_follower']:.3f}, "
-          f"{best['p_left']:.3f}, {best['p_crash']:.3f})  "
+          f"p=({best['p_follower']:.3f}, {best['p_left']:.3f}, {best['p_ped2']:.3f})  "
           f"deltas={best['deltas']}")
+    print()
+
+    best_idx = next(i for i in range(len(results)) if results[i] is best)
 
     return {
         "status": True,
@@ -399,6 +359,13 @@ def solve_mpc_pareto(client, agents, cfg, emergency):
         "deltas": best["deltas"],
         "t_build": best["t_build"],
         "t_solve": best["t_solve"],
+        "t_solve_all": t_solve_all,
         "num_constraints": best["num_constraints"],
         "num_variables": best["num_variables"],
+        "pareto_log": {
+            "all_points": pts.tolist(),
+            "pareto_mask": mask.tolist(),
+            "selected_idx": int(best_idx),
+        },
+        "u_applied": [a_opt, beta_opt],
     }

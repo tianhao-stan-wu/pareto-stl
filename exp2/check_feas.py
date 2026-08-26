@@ -4,7 +4,7 @@ import cvxpy as cp
 
 from src.utils import draw_sample_traj, bicycle_to_carla, COLORS
 from exp2.stl import (
-    safe_distance_vehicle, stay_in_lane,
+    safe_distance_vehicle, safe_distance_walker, stay_in_lane,
     bounded_deceleration, bounded_steering_rate, safe_distance_box,
 )
 from exp2.mpc import ego_state, build_nominal, _ENV
@@ -17,7 +17,7 @@ _GATE_PARAMS = dict(
 DELTA_TOL = 1e-5
 
 
-def check_feasibility(client, agents, cfg, emergency):
+def check_feasibility(client, agents, cfg, emergency, u_prev=None):
 
     S = cfg["mpc"]["num_samples"]
     dt = cfg["carla"]["dt"]
@@ -27,26 +27,22 @@ def check_feasibility(client, agents, cfg, emergency):
     d_safe_x = float(cfg["stl"]["d_safe_x"])
     d_safe_y = float(cfg["stl"]["d_safe_y"])
     d_crash = float(cfg["stl"]["d_crash"])
+    d_ped = float(cfg["stl"]["d_ped"])
     a_comfort = float(cfg["stl"]["a_comfort"])
     beta_rate = float(cfg["stl"]["beta_rate_max"])
 
-    ego, leader, follower, left = agents[0], agents[1], agents[2], agents[3]
+    ego, leader, follower, left, ped2 = agents[0], agents[1], agents[2], agents[3], agents[4]
+    z_ego = ego.get_transform().location.z
 
     x0 = ego_state(ego)
-    X_nom, U_nom, A, B, c = build_nominal(ego, dt, N, x0)
+    X_nom, U_nom, A, B, c = build_nominal(ego, dt, N, x0, u_prev=u_prev)
+
+    draw_sample_traj(client.world, X_nom[:, :2], color=COLORS["magenta"], life_time=lt, z=z_ego)
 
     leader_trajs = leader.sample_trajectories(N, dt, S)
     follower_trajs = follower.sample_trajectories(N, dt, S)
     left_trajs = left.sample_trajectories(N, dt, S)
-
-    z_ego = ego.get_transform().location.z
-    z_ld = leader.get_transform().location.z
-    z_f = follower.get_transform().location.z
-    z_lt = left.get_transform().location.z
-
-    # draw_sample_traj(client.world, leader_trajs, color=COLORS["green"], life_time=lt, z=z_ld)
-    # draw_sample_traj(client.world, follower_trajs, color=COLORS["red"], life_time=lt, z=z_f)
-    # draw_sample_traj(client.world, left_trajs, color=COLORS["yellow"], life_time=lt, z=z_lt)
+    ped2_stl = ped2.sample_trajectories(N, dt, S)
 
     t0 = time.perf_counter()
 
@@ -101,7 +97,6 @@ def check_feasibility(client, agents, cfg, emergency):
     deltas["follower_y"] = dy_f
 
     if emergency:
-
         # left vehicle
         c_l, dx_l, dy_l = safe_distance_vehicle(
             x, left_trajs, d_safe_x, d_safe_y, label="left")
@@ -109,6 +104,12 @@ def check_feasibility(client, agents, cfg, emergency):
         cons += [dx_l <= 0, dy_l <= 0]
         deltas["left_x"] = dx_l
         deltas["left_y"] = dy_l
+
+        # ped2
+        c_p, d_p = safe_distance_walker(x, ped2_stl, d_ped, label="ped2")
+        cons += c_p
+        cons += [d_p <= 0]
+        deltas["ped2"] = d_p
 
         # crash scene box
         c_cr, d_cr = safe_distance_box(
@@ -119,6 +120,9 @@ def check_feasibility(client, agents, cfg, emergency):
             y_max=cfg["stl"]["crash_y_max"],
             d_safe=d_crash,
         )
+        cons += c_cr
+        cons += [d_cr <= 0]
+        deltas["crash"] = d_cr
 
     # objective
     objective = cp.Minimize(
@@ -139,7 +143,13 @@ def check_feasibility(client, agents, cfg, emergency):
 
     if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
         print(f"  [gate] solver failed -> PARETO")
-        return {"status": False}
+        return {
+            "status": False,
+            "t_build": t_build,
+            "t_solve": t_solve,
+            "num_constraints": n_cons,
+            "num_variables": n_vars,
+        }
 
     delta_vals = {k: float(v.value) for k, v in deltas.items() if v.value is not None}
     delta_sum = float(sum(delta_vals.values()))
@@ -148,6 +158,7 @@ def check_feasibility(client, agents, cfg, emergency):
     for k, v in delta_vals.items():
         print(f"         {k:12s}: {v:.6f}")
     print(f"  [gate] -> {'NOMINAL' if delta_sum <= DELTA_TOL else 'PARETO'}")
+    print()
 
     draw_sample_traj(client.world, x.value[:2, :].T, color=COLORS["blue"], life_time=lt, z=z_ego)
 
@@ -164,4 +175,5 @@ def check_feasibility(client, agents, cfg, emergency):
         "t_solve": t_solve,
         "num_constraints": n_cons,
         "num_variables": n_vars,
+        "u_applied": [a_opt, beta_opt],
     }

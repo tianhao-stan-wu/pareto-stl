@@ -16,8 +16,9 @@ from src.config import load_config
 from src.client import Client
 from src.agents import Vehicle, Walker
 from src.utils import (
-    set_all_lights_green, setup_logging, setup_camera, save_frame, 
-    save_stats, save_trajectories, imgs_to_video, compute_and_save_robustness, set_traffic_lights_by_location
+    set_all_lights_green, setup_logging, setup_camera, save_frame,
+    save_stats, save_trajectories, imgs_to_video, save_pareto_log,
+    save_robustness_exp2,
 )
 
 from exp2.mpc import solve_mpc_pareto
@@ -26,10 +27,9 @@ from exp2.check_feas import check_feasibility
 
 def main():
 
-    # init
     cfg = load_config(exp="exp2")
     log_dir, img_dir = setup_logging(cfg)
-    
+
     seed = cfg["project"]["seed"]
     random.seed(seed)
     np.random.seed(seed)
@@ -41,37 +41,47 @@ def main():
 
     # spawn agents
     ego = Vehicle(client.world, cfg, "ego_vehicle")
-
     leader = Vehicle(client.world, cfg, "leader")
     follower = Vehicle(client.world, cfg, "follower")
     left = Vehicle(client.world, cfg, "left_vehicle")
-    
+
     col1 = Vehicle(client.world, cfg, "collision_v1")
     col2 = Vehicle(client.world, cfg, "collision_v2")
 
     ped1 = Walker(client.world, cfg, "pedestrian1")
-    ped2 = Walker(client.world, cfg, "pedestrian2")    
+    ped2 = Walker(client.world, cfg, "pedestrian2")
 
-    agents = [ego, leader, follower, left]
+    agents = [ego, leader, follower, left, ped2]
 
-    # setup
+    # timing
     dt = cfg["carla"]["dt"]
     start_tick = int(cfg["mpc"]["sim_start"] / dt)
     end_tick = int(cfg["mpc"]["sim_end"] / dt)
     emergency_tick = int(cfg["mpc"]["emergency_start"] / dt)
     swerve_left_tick = int((cfg["mpc"]["emergency_start"] - 0.7) / dt)
     swerve_right_tick = int((cfg["mpc"]["emergency_start"] - 0.2) / dt)
-    straight_tick = int((cfg["mpc"]["emergency_start"] + 0.5) / dt)
 
     agent_trajectories = {agent.key: [] for agent in agents}
 
-    build_times = []
-    solve_times = []
-    num_constraints = None
-    num_variables = None
+    feas_build_times = []
+    feas_solve_times = []
+    feas_num_constraints = None
+    feas_num_variables = None
+
+    pareto_build_times = []
+    pareto_solve_times = []
+    pareto_solve_all_times = []
+    pareto_num_constraints = None
+    pareto_num_variables = None
+
+    pareto_records = []
+    u_prev = None
 
     tick = 0
     camera_tick = start_tick
+
+    n_infeas = 0
+    n_infeas_resolved = 0
 
     solver = next((s for s in [cp.GUROBI, cp.CPLEX, cp.SCIP, cp.CBC]
                    if s in cp.installed_solvers()), None)
@@ -79,116 +89,160 @@ def main():
         raise RuntimeError(f"No MIP solver found. Installed: {cp.installed_solvers()}")
     else:
         print(f"Installed solver: {cp.installed_solvers()}")
-        print(f"Selected solver: {solver} \n")
+        print(f"Selected solver: {solver}\n")
 
     try:
         while True:
-              
-            print(f"tick: {tick} \n")
+
+            print(f"tick: {tick}\n")
 
             client.tick()
 
-            # save carla image
+            # camera
             if tick == camera_tick:
                 camera.listen(img_queue.put)
-
             if tick > camera_tick:
                 save_frame(img_queue, img_dir, tick - camera_tick)
 
-            # control step
+            # warmup
             if tick < start_tick:
-
-                ego.step(acc=0.9)
+                ego.step(acc=0.85)
                 leader.step(acc=1)
                 follower.step(acc=1)
-                left.step(acc=1)
+                left.step(acc=0.9)
 
-            else:
+            # mpc phase
+            elif tick < end_tick:
 
+                # leader scripted behaviour
                 if tick < swerve_left_tick:
                     leader.step()
-
                 elif swerve_left_tick <= tick < swerve_right_tick:
                     control = carla.VehicleControl(
                         throttle=0.35,
-                        steer=-0.1*(tick-swerve_left_tick),
-                        brake=0.0
+                        steer=-0.15 * (tick - swerve_left_tick),
+                        brake=0.0,
                     )
                     leader.actor.apply_control(control)
-
                 elif swerve_right_tick <= tick < emergency_tick:
                     control = carla.VehicleControl(
-                        throttle=0.35,
-                        steer=0.15,
-                        brake=0.0
+                        throttle=0.35, steer=0.2, brake=0.0,
                     )
                     leader.actor.apply_control(control)
-
                 elif tick == emergency_tick:
                     leader.agent.set_destination(
                         carla.Location(x=-359.331, y=8.909, z=2.803)
                     )
-
-                else:
                     leader.step()
+                else:
+                    if not leader.is_done():
+                        leader.step()
 
+                # follower and left
                 if start_tick <= tick < emergency_tick:
                     follower.step(acc=0.7)
                     left.step(acc=0.8)
                 else:
-                    follower.step()
-                    left.step(steer=0)
+                    if not follower.is_done():
+                        follower.step()
+                    if not left.is_done():
+                        left.step(steer=0)
 
+                # pedestrian
+                ped2.random_step()
+
+                # skip feas and pareto if ego speed stops
+                if ego.get_speed() < 1:
+                    ego.step(acc=-0.1)  # apply small brake
+                    for agent in agents:
+                        loc = agent.get_transform().location
+                        agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
+                    tick += 1
+                    continue
+
+                # ego: gate then pareto
                 emergency = tick >= emergency_tick
-                result = check_feasibility(client, agents, cfg, emergency=emergency)
 
-                # if infeasible
-                if not result["status"]:
-                    result = solve_mpc_pareto(client, agents, cfg, emergency=emergency)
-    
-                ego.apply_control(result["control"])
+                feas_result = check_feasibility(
+                    client, agents, cfg, emergency=emergency, u_prev=u_prev)
 
-                build_times.append(result["t_build"])
-                solve_times.append(result["t_solve"])
-               
-                if num_constraints is None:
-                    num_constraints = result["num_constraints"]
-                    num_variables = result["num_variables"]
+                feas_build_times.append(feas_result["t_build"])
+                feas_solve_times.append(feas_result["t_solve"])
+
+                if feas_num_constraints is None:
+                    feas_num_constraints = feas_result["num_constraints"]
+                    feas_num_variables = feas_result["num_variables"]
+
+                if not feas_result["status"]:
+
+                    n_infeas += 1
+
+                    pareto_result = solve_mpc_pareto(
+                        client, agents, cfg, emergency=emergency, u_prev=u_prev)
+
+                    if pareto_result["status"]:
+
+                        n_infeas_resolved += 1
+
+                        pareto_build_times.append(pareto_result["t_build"])
+                        pareto_solve_times.append(pareto_result["t_solve"])
+                        pareto_solve_all_times.append(pareto_result["t_solve_all"])
+
+                        if pareto_num_constraints is None:
+                            pareto_num_constraints = pareto_result["num_constraints"]
+                            pareto_num_variables = pareto_result["num_variables"]
+
+                        pareto_records.append({
+                            "tick": tick,
+                            **pareto_result["pareto_log"],
+                        })
+
+                    ego.apply_control(pareto_result["control"])
+                    u_prev = pareto_result["u_applied"]
+
+                else:
+                    ego.apply_control(feas_result["control"])
+                    u_prev = feas_result["u_applied"]
 
                 for agent in agents:
                     loc = agent.get_transform().location
                     agent_trajectories[agent.key].append([float(loc.x), float(loc.y)])
 
+            else:
+                print("End of simulation")
+                break
+
+            # background vehicles always brake to stop
             col1.step(acc=-1)
             col2.step(acc=-1)
 
             tick += 1
 
-            if tick == end_tick:
-                print("End of simulation")
-                break 
-
     finally:
-        
+
         camera.stop()
         camera.destroy()
         client.quit(destroy=True)
 
-        save_stats(build_times, solve_times, num_constraints, num_variables, log_dir)
-        save_trajectories(agent_trajectories, log_dir)
-        imgs_to_video(log_dir)   
-        
-        agent_dims = {}
+        total_tick = end_tick - start_tick
 
-        for agent in agents:
-            if hasattr(agent, "width") and hasattr(agent, "length"):
-                agent_dims[agent.key] = {"width": agent.width, "length": agent.length}
-
-        compute_and_save_robustness(
-            agent_trajectories, cfg["stl"], agent_dims, cfg["carla"]["dt"], log_dir
+        save_stats(
+            feas_build_times, feas_solve_times,
+            feas_num_constraints, feas_num_variables,
+            pareto_build_times, pareto_solve_times, pareto_solve_all_times,
+            pareto_num_constraints, pareto_num_variables,
+            total_tick, n_infeas, n_infeas_resolved,
+            log_dir,
         )
 
-        
+        save_pareto_log(pareto_records, log_dir)
+        save_trajectories(agent_trajectories, log_dir)
+        imgs_to_video(log_dir)
+
+        save_robustness_exp2(
+            agent_trajectories, cfg["stl"], cfg["carla"]["dt"], log_dir
+        )
+
+
 if __name__ == "__main__":
     main()
-

@@ -67,6 +67,44 @@ def safe_distance_vehicle(
     return constraints, delta_x, delta_y
 
 
+def safe_distance_walker(
+    x_var: cp.Variable,
+    agent_traj: np.ndarray,
+    d_safe: float,
+    big_M: float = 200.0,
+    label: str = "walker",
+):
+    """
+    Safe distance from a pedestrian, enforced over EVERY sampled trajectory.
+    Identical structure to safe_distance_vehicle; kept separate so the two
+    agent classes can carry independent slack variables and margins.
+    """
+    traj = _as_3d(agent_traj)
+    S    = traj.shape[0]
+    T    = min(traj.shape[1], x_var.shape[1])
+    traj = traj[:, :T, :]
+
+    AX = traj[:, :, 0]
+    AY = traj[:, :, 1]
+    PX = _promote(x_var[0, :T], S)
+    PY = _promote(x_var[1, :T], S)
+
+    delta = cp.Variable(nonneg=True, name=f"delta_{label}")
+    z0 = cp.Variable((S, T), boolean=True, name=f"z0_{label}")
+    z1 = cp.Variable((S, T), boolean=True, name=f"z1_{label}")
+    z2 = cp.Variable((S, T), boolean=True, name=f"z2_{label}")
+    z3 = cp.Variable((S, T), boolean=True, name=f"z3_{label}")
+
+    constraints = [
+        z0 + z1 + z2 + z3 >= 1,
+        AX - PX <= -d_safe + delta + big_M * (1 - z0),
+        AX - PX >=  d_safe - delta - big_M * (1 - z1),
+        AY - PY <= -d_safe + delta + big_M * (1 - z2),
+        AY - PY >=  d_safe - delta - big_M * (1 - z3),
+    ]
+    return constraints, delta
+    
+
 def stay_in_lane(
     x_var: cp.Variable,
     x_min: float,

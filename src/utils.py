@@ -271,6 +271,119 @@ def save_robustness_exp1(agent_locations, stl_cfg, dt, log_dir):
               f"violations={r['num_violations']}/{r['total_steps']}  {status}")
 
 
+def save_robustness_exp2(agent_locations, stl_cfg, dt, log_dir):
+    """
+    Compute and save STL robustness for exp2 specifications:
+      (1) safe distance with leader   (L-inf, d_safe_y along travel axis)
+      (2) safe distance with follower
+      (3) safe distance with left vehicle
+      (4) stay in lane                (y_min relaxable)
+      (5) crash scene box             (inflated rectangle)
+    """
+    from pathlib import Path
+
+    ego = np.array(agent_locations["ego_vehicle"])
+    T = len(ego)
+
+    results = {}
+
+    # (1)(2)(3) safe distance per vehicle — L-inf with separate x/y margins
+    d_safe_x = float(stl_cfg["d_safe_x"])
+    d_safe_y = float(stl_cfg["d_safe_y"])
+
+    for key in ["leader", "follower", "left_vehicle"]:
+        if key not in agent_locations:
+            continue
+
+        agent = np.array(agent_locations[key])
+        Tk = min(T, len(agent))
+
+        dx = np.abs(ego[:Tk, 0] - agent[:Tk, 0])
+        dy = np.abs(ego[:Tk, 1] - agent[:Tk, 1])
+
+        ro_x = dx - d_safe_x
+        ro_y = dy - d_safe_y
+        ro = np.maximum(ro_x, ro_y)   # positive = outside keep-out box
+
+        results[key] = {
+            "min_robustness": float(np.min(ro)),
+            "num_violations": int(np.sum(ro < 0)),
+            "total_steps": int(Tk),
+            "per_step": ro.tolist(),
+        }
+
+    # (4) stay in lane — robustness = min(px - x_min, x_max - px, py - y_min, y_max - py)
+    #     only y_min is relaxable, but robustness is computed for all four bounds
+    x_min = float(stl_cfg["x_min"])
+    x_max = float(stl_cfg["x_max"])
+    y_min = float(stl_cfg["y_min"])
+    y_max = float(stl_cfg["y_max"])
+
+    ro_lane = np.minimum(
+        np.minimum(ego[:T, 0] - x_min, x_max - ego[:T, 0]),
+        np.minimum(ego[:T, 1] - y_min, y_max - ego[:T, 1]),
+    )
+
+    results["lane"] = {
+        "min_robustness": float(np.min(ro_lane)),
+        "num_violations": int(np.sum(ro_lane < 0)),
+        "total_steps": int(T),
+        "per_step": ro_lane.tolist(),
+    }
+
+    # (5) crash scene box — robustness = distance from inflated box boundary
+    #     positive = outside, negative = inside
+    d_crash = float(stl_cfg["d_crash"])
+    cx_min = float(stl_cfg["crash_x_min"]) - d_crash
+    cx_max = float(stl_cfg["crash_x_max"]) + d_crash
+    cy_min = float(stl_cfg["crash_y_min"]) - d_crash
+    cy_max = float(stl_cfg["crash_y_max"]) + d_crash
+
+    inside_x = np.minimum(ego[:T, 0] - cx_min, cx_max - ego[:T, 0])
+    inside_y = np.minimum(ego[:T, 1] - cy_min, cy_max - ego[:T, 1])
+    penetration = np.minimum(inside_x, inside_y)
+    ro_crash = -penetration   # positive = outside box
+
+    results["crash"] = {
+        "min_robustness": float(np.min(ro_crash)),
+        "num_violations": int(np.sum(ro_crash < 0)),
+        "total_steps": int(T),
+        "per_step": ro_crash.tolist(),
+    }
+
+    # save
+    path = Path(log_dir) / "robustness_summary.txt"
+    with open(path, "w") as f:
+        f.write("STL Robustness Summary (Exp 2)\n\n")
+
+        f.write(f"{'spec':<20} {'min_rho':>10} {'violations':>12}\n")
+        f.write(f"{'-'*45}\n")
+        for key, r in results.items():
+            status = "pass" if r["min_robustness"] >= 0 else "FAIL"
+            f.write(f"{key:<20} {r['min_robustness']:>+10.3f} "
+                    f"{r['num_violations']:>5}/{r['total_steps']:<5} {status}\n")
+
+        f.write(f"\n\nPer-step robustness\n\n")
+        keys = list(results.keys())
+        header = f"{'step':>6}" + "".join(f"{k:>14}" for k in keys)
+        f.write(header + "\n")
+        f.write("-" * len(header) + "\n")
+
+        max_t = max(len(results[k]["per_step"]) for k in keys)
+        for t in range(max_t):
+            row = f"{t:>6}"
+            for k in keys:
+                steps = results[k]["per_step"]
+                row += f"{steps[t]:>+14.3f}" if t < len(steps) else f"{'':>14}"
+            f.write(row + "\n")
+
+    print(f"\nRobustness saved to {path}")
+    for key, r in results.items():
+        status = "pass" if r["min_robustness"] >= 0 else "FAIL"
+        print(f"  {key:<20} min_rho={r['min_robustness']:>+.3f}  "
+              f"violations={r['num_violations']}/{r['total_steps']}  {status}")
+
+
 # ------------------------------------------------------------------
 # mpc
 # ------------------------------------------------------------------

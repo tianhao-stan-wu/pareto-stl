@@ -13,25 +13,26 @@ carla:
   dt: 0.1 
   sync_mode: true
   spectator:
-    location: {x: -263.608, y: 8.335, z: 7.508}
-    rotation: {pitch: -19.566, yaw: -0.978, roll: 0.000}
+    location: {x: -282.375, y: 7.686, z: 13.805}
+    rotation: {pitch: -25.180, yaw: 0.857, roll: 0.000}
 
 mpc:
   horizon: 2             
   num_samples: 30
-  num_prob: 30        
-  sim_start: 3
-  emergency_start: 5     
-  sim_end: 15
+  num_prob: 15        
+  sim_start: 3.5
+  emergency_start: 5.5     
+  sim_end: 10
   type: "pareto"
-  density: 1
+  density: 2
 
 stl:
-  d_safe_x: 10.0
+  d_safe_x: 5.0
   d_safe_y: 3.0
-  d_crash: 0.5
-  a_comfort: -3.5
-  beta_rate_max: 0.1
+  d_crash: 1
+  d_ped: 2
+  a_comfort: -4
+  beta_rate_max: 0.2
 
   x_min: -346.205
   x_max: -156.287
@@ -56,7 +57,7 @@ ego_vehicle:
     location: {x: -280.862, y: 6.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
   lr: 1.50            # dynamics params obtained from utils.py
-  acc_min: -10
+  acc_min: -6
   acc_max: 6
   beta_min: -0.262    # beta_max = 0.262 (≈15.0°) → δ = 28.6°  → steer_max = 0.408
   beta_max: 0.262 
@@ -91,6 +92,8 @@ follower:
   destination:
     location: {x: -280.862, y: 6.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+  std_acc: 0.1
+  std_steer: 0.005
 
 left_vehicle:
   blueprint: "vehicle.mercedes.coupe_2020"
@@ -104,6 +107,8 @@ left_vehicle:
   destination:
     location: {x: -280.862, y: 8.375, z: 3.150}
     rotation: {pitch: -2.102, yaw: -86.557, roll: 0.000}
+  std_acc: 0.1
+  std_steer: 0.005
 
 collision_v1:
   blueprint: "vehicle.nissan.patrol_2021"
@@ -128,7 +133,7 @@ collision_v2:
 pedestrian1:
   blueprint: "walker.pedestrian.0001"
   spawn:
-    location: {x: -253.862, y: 4.775, z: 3.150}
+    location: {x: -256.862, y: 4.775, z: 3.150}
     rotation: {pitch: -6.056, yaw: 0, roll: 0.000}
   mean_speed: 4
   std_speed: 1.5
@@ -137,11 +142,11 @@ pedestrian1:
 pedestrian2:
   blueprint: "walker.pedestrian.0002"
   spawn:
-    location: {x: -252.862, y: 4.775, z: 3.150}
-    rotation: {pitch: -6.056, yaw: -175.498, roll: 0.000}
-  mean_speed: 4
-  std_speed: 1.5
-  std_dir: 0.1
+    location: {x: -250.862, y: 4.775, z: 3.150}
+    rotation: {pitch: -6.056, yaw: -178.498, roll: 0.000}
+  mean_speed: 2
+  std_speed: 1
+  std_dir: 0.05
 
 
 
