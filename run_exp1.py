@@ -33,13 +33,34 @@ from exp1.theorem1 import (
 
 def main():
 
-    # init
     cfg = load_config(exp="exp1")
-    log_dir, img_dir = setup_logging(cfg)
-    
-    seed = cfg["project"]["seed"]
+
+    # Allow trial-specific seed from command line
+    seed = int(sys.argv[1]) if len(sys.argv) > 1 else cfg["project"]["seed"]
+    cfg["project"]["seed"] = seed
+
+    # Seed everything before generating initial conditions
     random.seed(seed)
     np.random.seed(seed)
+
+    # Randomize initial conditions
+    ego_dy = random.uniform(-3.0, 3.0)
+    amb_dy = random.uniform(-3.0, 3.0)
+    ped_dx = random.uniform(-1.0, 1.0)
+
+    cfg["ego_vehicle"]["spawn"]["location"]["y"] += ego_dy
+    cfg["ambulance"]["spawn"]["location"]["y"] += amb_dy
+    cfg["pedestrian"]["spawn"]["location"]["x"] += ped_dx
+
+    print(f"Trial seed: {seed}")
+    print(
+        f"Initial conditions: "
+        f"ego dy={ego_dy:+.3f}, "
+        f"ambulance dy={amb_dy:+.3f}, "
+        f"pedestrian dx={ped_dx:+.3f}"
+    )
+
+    log_dir, img_dir = setup_logging(cfg)
 
     print(f"Starting project: {cfg['project']['name']}")
 
@@ -55,7 +76,7 @@ def main():
     ped = Walker(client.world, cfg, "pedestrian")
     agents = [ego, amb, ped]
 
-    # amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
+    amb.agent._proximity_threshold = cfg["ambulance"]["proximity_threshold"]
 
     # spawn other road vehicles 
     v1 = Vehicle(client.world, cfg, "v1")

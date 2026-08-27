@@ -4,6 +4,7 @@ import random
 import numpy as np
 import math
 import json
+import yaml
 
 import shutil
 from datetime import datetime
@@ -31,7 +32,10 @@ def setup_logging(cfg):
 
     # save config copy
     exp = cfg["project"]["exp"]
-    shutil.copy(f"configs/{exp}.yaml", f"{log_dir}/{exp}.yaml")
+
+    with open(log_dir / f"{exp}.yaml", "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+    # shutil.copy(f"configs/{exp}.yaml", f"{log_dir}/{exp}.yaml")
 
     print(f"Logging to {log_dir}")
     return log_dir, img_dir

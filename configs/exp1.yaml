@@ -18,13 +18,13 @@ carla:
 
 mpc:
   horizon: 2             
-  num_samples: 30
-  num_prob: 15        
+  num_samples: 10
+  num_prob: 10        
   sim_start: 5
   emergency_start: 6     
   sim_end: 10
   type: "pareto"
-  density: 5
+  density: 2
 
 theorem1:
   enabled: true
