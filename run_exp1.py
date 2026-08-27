@@ -35,11 +35,17 @@ def main():
 
     cfg = load_config(exp="exp1")
 
-    # Allow trial-specific seed from command line
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else cfg["project"]["seed"]
-    cfg["project"]["seed"] = seed
+    density = int(sys.argv[2]) if len(sys.argv) > 2 else cfg["mpc"]["density"]
+    num_runs = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
-    # Seed everything before generating initial conditions
+    cfg["project"]["seed"] = seed
+    cfg["mpc"]["density"] = density
+
+    cfg["project"]["name"] = (
+        f"{cfg['project']['exp']}_batch_d{density}_{num_runs}"
+    )
+
     random.seed(seed)
     np.random.seed(seed)
 
@@ -110,8 +116,8 @@ def main():
 
     theorem1_cfg = cfg.get("theorem1", {})
     theorem1_enabled = bool(theorem1_cfg.get("enabled", True))
-    theorem1_eps = float(theorem1_cfg.get("eps", 0.05))
-    theorem1_beta = float(theorem1_cfg.get("beta", 0.05))
+    theorem1_eps = float(theorem1_cfg.get("eps", 0.01))
+    theorem1_beta = float(theorem1_cfg.get("beta", 0.01))
     theorem1_N_approx = int(theorem1_cfg.get("N_approx", 10000))
     theorem1_records = []
 

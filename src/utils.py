@@ -25,7 +25,7 @@ def setup_logging(cfg):
     if type != "pareto":
         log_dir = Path(f"./logs/{name}/{type}/{timestamp}")
     else:
-        log_dir = Path(f"./logs/{name}/{type}_d_{density}/{timestamp}")
+        log_dir = Path(f"./logs/{name}/trials/{timestamp}")
 
     img_dir = log_dir / "imgs"
     img_dir.mkdir(parents=True, exist_ok=True)

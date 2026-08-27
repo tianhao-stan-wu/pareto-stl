@@ -18,8 +18,8 @@ carla:
 
 mpc:
   horizon: 2             
-  num_samples: 30
-  num_prob: 15        
+  num_samples: 10
+  num_prob: 10        
   sim_start: 3.5
   emergency_start: 5.5     
   sim_end: 10
@@ -35,7 +35,7 @@ theorem1:
 stl:
   d_safe_x: 5.0
   d_safe_y: 3.0
-  d_crash: 1
+  d_crash: 1.5
   d_ped: 2
   a_comfort: -4
   beta_rate_max: 0.2

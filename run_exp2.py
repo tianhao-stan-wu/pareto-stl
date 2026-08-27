@@ -34,13 +34,48 @@ from exp2.theorem1 import (
 def main():
 
     cfg = load_config(exp="exp2")
-    log_dir, img_dir = setup_logging(cfg)
 
-    seed = cfg["project"]["seed"]
+    seed = int(sys.argv[1]) if len(sys.argv) > 1 else cfg["project"]["seed"]
+    density = int(sys.argv[2]) if len(sys.argv) > 2 else cfg["mpc"]["density"]
+    num_runs = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+
+    cfg["project"]["seed"] = seed
+    cfg["mpc"]["density"] = density
+    cfg["project"]["name"] = (
+        f"{cfg['project']['exp']}_batch_d{density}_{num_runs}"
+    )
+
     random.seed(seed)
     np.random.seed(seed)
 
+    ego_dx = random.uniform(-3.0, 3.0)
+    leader_dx = random.uniform(-3.0, 3.0)
+    follower_dx = random.uniform(-3.0, 3.0)
+    left_dx = random.uniform(-3.0, 3.0)
+    ped_dx = random.uniform(-0.5, 0.5)
+
+    cfg["ego_vehicle"]["spawn"]["location"]["x"] += ego_dx
+    cfg["leader"]["spawn"]["location"]["x"] += leader_dx
+    cfg["follower"]["spawn"]["location"]["x"] += follower_dx
+    cfg["left_vehicle"]["spawn"]["location"]["x"] += left_dx
+    cfg["pedestrian2"]["spawn"]["location"]["x"] += ped_dx
+
+    print(f"Trial seed: {seed}")
+    print(
+        "Initial-condition perturbations:\n"
+        f"  ego:       dx={ego_dx:+.3f} m\n"
+        f"  leader:    dx={leader_dx:+.3f} m\n"
+        f"  follower:  dx={follower_dx:+.3f} m\n"
+        f"  left:      dx={left_dx:+.3f} m\n"
+        f"  pedestrian dx={ped_dx:+.3f} m"
+    )
+
+    # Create log directory after modifying cfg so the actual
+    # trial configuration can be saved.
+    log_dir, img_dir = setup_logging(cfg)
+
     print(f"Starting project: {cfg['project']['name']}")
+
 
     client = Client(cfg)
     camera, img_queue = setup_camera(client.world, cfg["carla"])

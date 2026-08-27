@@ -125,16 +125,13 @@ def verify_theorem1(
         "empirically_below_eps": None,
     }
 
-    # Only a solution that passes the theorem's validation set receives a
-    # certificate and the expensive Monte Carlo estimate.
-    if validated:
-        violations = sum(
-            not satisfies(x_star, sampler()) for _ in range(N_approx)
-        )
-        result["approx_violations"] = int(violations)
-        result["approx_samples"] = int(N_approx)
-        result["p_viol_hat"] = float(violations / N_approx)
-        result["empirically_below_eps"] = bool(result["p_viol_hat"] <= eps)
+    violations = sum(
+        not satisfies(x_star, sampler()) for _ in range(N_approx)
+    )
+    result["approx_violations"] = int(violations)
+    result["approx_samples"] = int(N_approx)
+    result["p_viol_hat"] = float(violations / N_approx)
+    result["empirically_below_eps"] = bool(result["p_viol_hat"] <= eps)
 
     return result
 

@@ -155,14 +155,13 @@ def verify_theorem1(
         "empirically_below_eps": None,
     }
 
-    if validated:
-        violations = sum(
-            not satisfies(x_star, u_star, sampler()) for _ in range(N_approx)
-        )
-        result["approx_violations"] = int(violations)
-        result["approx_samples"] = int(N_approx)
-        result["p_viol_hat"] = float(violations / N_approx)
-        result["empirically_below_eps"] = bool(result["p_viol_hat"] <= eps)
+    violations = sum(
+        not satisfies(x_star, u_star, sampler()) for _ in range(N_approx)
+    )
+    result["approx_violations"] = int(violations)
+    result["approx_samples"] = int(N_approx)
+    result["p_viol_hat"] = float(violations / N_approx)
+    result["empirically_below_eps"] = bool(result["p_viol_hat"] <= eps)
 
     return result
 

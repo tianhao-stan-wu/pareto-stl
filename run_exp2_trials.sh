@@ -9,7 +9,7 @@ START_SEED=0
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate pareto-stl
 
-BATCH_DIR="logs/exp1_batch_d${DENSITY}_${NUM_RUNS}"
+BATCH_DIR="logs/exp2_batch_d${DENSITY}_${NUM_RUNS}"
 mkdir -p "$BATCH_DIR"
 mkdir -p "$BATCH_DIR/log"
 mkdir -p "$BATCH_DIR/trials"
@@ -38,10 +38,13 @@ trap cleanup EXIT INT TERM
 for ((i=0; i<NUM_RUNS; i++)); do
 
     seed=$((START_SEED + i))
+
+    LOG_FILE="$BATCH_DIR/log/trial_${i}.log"
     DONE_FILE="$BATCH_DIR/log/trial_${i}.done"
 
+    # Skip trials that already completed successfully
     if [ -f "$DONE_FILE" ]; then
-        echo "Trial $((i + 1)) already completed. Skipping."
+        echo "Trial $((i + 1)) / $NUM_RUNS already completed. Skipping."
         continue
     fi
 
@@ -51,14 +54,14 @@ for ((i=0; i<NUM_RUNS; i++)); do
     echo "Seed: $seed"
     echo "========================================"
 
-    python run_exp1.py "$seed" "$DENSITY" "$NUM_RUNS" 2>&1 \
-        | tee "$BATCH_DIR/log/trial_${i}.log"
+    python run_exp2.py "$seed" "$DENSITY" "$NUM_RUNS" 2>&1 \
+        | tee "$LOG_FILE"
 
     status=${PIPESTATUS[0]}
 
     if [ "$status" -eq 0 ]; then
         touch "$DONE_FILE"
-        echo "Trial $((i + 1)) completed."
+        echo "Trial $((i + 1)) completed successfully."
     else
         echo "Trial $((i + 1)) FAILED with exit code $status."
     fi
@@ -66,6 +69,6 @@ for ((i=0; i<NUM_RUNS; i++)); do
 done
 
 echo "========================================"
-echo "All $NUM_RUNS trials finished."
+echo "All $NUM_RUNS Exp. 2 trials finished."
 echo "Density: $DENSITY"
 echo "========================================"
